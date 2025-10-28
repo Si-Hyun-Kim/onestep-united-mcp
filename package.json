@@ -1,0 +1,19 @@
+{
+  "name": "firewall-dashboard",
+  "version": "2.0.0",
+  "description": "Suricata MCP Dashboard with real-time monitoring",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "nodemon --watch server.js --watch mcp-client.js --watch public --ext js,html,css server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "ejs": "^3.1.10",
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "nodemon": "^3.1.0"
+  }
+}
