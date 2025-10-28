@@ -1,0 +1,36 @@
+# agent/config.yaml
+
+agent:
+  name: "SecurityAgent"
+  check_interval: 30  # 30초마다 분석
+
+ollama:
+  host: "http://localhost:11434"
+  model: "qwen2.5:7b"
+  temperature: 0.3  # 낮을수록 일관성 ↑
+  max_tokens: 2000
+
+detection:
+  alert_threshold: 5  # IP당 알림 임계값
+  time_window: 300    # 5분 시간 윈도우
+  severity_weights:
+    critical: 10
+    high: 5
+    medium: 2
+    low: 1
+
+suricata:
+  log_path: "/var/log/suricata/eve.json"
+  rules_path: "/etc/suricata/rules"
+  custom_rules_path: "./rules/custom/auto_generated.rules"
+
+hexstrike:
+  log_path: "./logs/hexstrike"
+
+auto_response:
+  enabled: true       # 자동 차단 활성화
+  block_threshold: 20 # 차단 점수 임계값
+  whitelist:
+    - "127.0.0.1"
+    - "localhost"
+    - "192.168.1.1"   # 신뢰하는 IP 추가

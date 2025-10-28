@@ -1,0 +1,340 @@
+# 🛡️ AI 기반 자동 보안 시스템 - 전체 프로젝트 구조
+
+## 📂 디렉토리 구조
+
+```
+security-automation/
+├── README.md
+├── requirements.txt
+├── setup.sh
+├── start_all.sh
+├── stop_all.sh
+├── restart.sh
+├── status.sh
+│
+├── mcp_server/                    # FastMCP 서버
+│   ├── __init__.py
+│   ├── mcp_server.py              # 메인 MCP 서버
+│   ├── log_collectors.py          # 로그 수집기
+│   └── rule_manager.py            # Suricata 룰 관리
+│
+├── agent/                         # FastAgent + Ollama
+│   ├── __init__.py
+│   ├── security_agent.py          # 메인 에이전트
+│   ├── ollama_analyzer.py         # Ollama AI 분석기
+│   ├── rule_generator.py          # 룰 생성기
+│   └── config.yaml                # 에이전트 설정
+│
+├── api/                           # FastAPI 백엔드
+│   ├── __init__.py
+│   ├── main.py                    # FastAPI 앱
+│   ├── models.py                  # 데이터 모델
+│   ├── routes/
+│   │   ├── __init__.py
+│   │   ├── logs.py                # 로그 API
+│   │   ├── rules.py               # 룰 API
+│   │   ├── reports.py             # 보고서 API
+│   │   └── analysis.py            # 분석 API
+│   └── websocket.py               # 실시간 스트리밍
+│
+├── dashboard/                     # Flask 웹 대시보드
+│   ├── __init__.py
+│   ├── app.py                     # Flask 앱
+│   ├── auth.py                    # MFA 인증
+│   ├── util.py
+│   ├── static/
+│   │   ├── css/
+│   │   │   └── style.css
+│   │   └── js/
+│   │       ├── dashboard.js
+│   │       ├── charts.js
+│   │       └── realtime.js
+│   ├── templates/
+│   │   ├── base.html
+│   │   ├── login.html
+│   │   ├── dashboard.html
+│   │   ├── logs.html
+│   │   ├── rules.html
+│   │   ├── analysis.html
+│   │   ├── comparison.html
+│   │   └── reports.html
+│   └── config.py
+│
+├── vulnerable_app/                # 취약한 웹 서버 (테스트용)
+│   ├── frontend/                  # 3000번 포트
+│   │   ├── index.html
+│   │   └── app.js
+│   └── backend/                   # 5000번 포트
+│       └── server.py
+│
+├── logs/                          # 로그 저장소
+│   ├── suricata/                  # Suricata 로그
+│   ├── hexstrike/                 # HexStrike 로그
+│   ├── agent/                     # 에이전트 로그
+│   └── actions/                   # 자동 차단 기록
+│
+├── rules/                         # Suricata 룰
+│   ├── custom/                    # 자동 생성 룰
+│   └── backup/                    # 룰 백업
+│
+├── reports/                       # 생성된 보고서
+│   └── .gitkeep
+│
+└── tests/                         # 테스트
+    ├── test_mcp.py
+    ├── test_agent.py
+    └── test_api.py
+```
+
+## 🚀 빠른 시작
+
+### 1. 시스템 요구사항
+
+```bash
+# Ubuntu/Debian
+- Python 3.10+
+- Node.js 18+
+- Suricata IPS
+- Ollama
+- 최소 4GB RAM
+- 10GB 디스크 공간
+```
+
+### 2. 의존성 설치
+
+```bash
+# 1. 레포지토리 클론
+git clone <your-repo>
+cd security-automation
+
+# 2. 자동 설치 스크립트 실행
+chmod +x setup.sh
+./setup.sh
+```
+
+### 3. Ollama 설치 및 모델 다운로드
+
+```bash
+# Ollama 설치
+curl -fsSL https://ollama.com/install.sh | sh
+
+# Qwen3 모델 다운로드
+ollama pull qwen2.5:7b
+
+# 모델 확인
+ollama list
+```
+
+### 4. HexStrike AI 로그 연동 설정
+
+Red Team 서버에서 HexStrike AI 로그를 Blue Team 서버로 전송:
+
+```bash
+# Red Team 서버 (HexStrike AI)
+# 로그를 rsync로 실시간 전송
+rsync -avz --progress \
+  /var/log/hexstrike/ \
+  user@blue-team-server:/path/to/security-automation/logs/hexstrike/
+
+# 또는 SSH 터널링
+ssh -L 9000:localhost:9000 user@blue-team-server
+```
+
+### 5. 시스템 시작
+
+```bash
+# 모든 서비스 시작
+./start_all.sh
+
+# 개별 실행
+python3 mcp_server/mcp_server.py        # MCP 서버
+python3 agent/security_agent.py         # AI 에이전트
+python3 api/main.py                     # FastAPI
+python3 dashboard/app.py                # Flask 대시보드
+```
+
+### 6. 웹 대시보드 접속
+
+```
+http://localhost:8080
+```
+
+기본 관리자 계정:
+- ID: admin
+- Password: (초기 설정 시 생성)
+
+## 📋 requirements.txt
+
+```txt
+# FastMCP & MCP 관련
+mcp==1.0.0
+fastmcp==0.2.0
+
+# FastAPI & 웹
+fastapi==0.109.0
+uvicorn==0.27.0
+websockets==12.0
+python-multipart==0.0.6
+
+# Flask 대시보드
+Flask==3.0.0
+Flask-Login==0.6.3
+Flask-WTF==1.2.1
+pyotp==2.9.0
+qrcode==7.4.2
+
+# 데이터 처리
+pandas==2.1.4
+numpy==1.26.3
+
+# Ollama
+ollama==0.1.6
+
+# 유틸리티
+python-dotenv==1.0.0
+pyyaml==6.0.1
+requests==2.31.0
+aiofiles==23.2.1
+
+# 차트/그래프
+plotly==5.18.0
+matplotlib==3.8.2
+
+# 보고서 생성
+reportlab==4.0.9
+jinja2==3.1.3
+
+# 로깅
+loguru==0.7.2
+
+# 시스템
+psutil==5.9.8
+```
+
+## 🔧 설정 파일
+
+### agent/config.yaml
+
+```yaml
+agent:
+  name: "SecurityAgent"
+  check_interval: 30  # 30초마다 분석
+  
+ollama:
+  host: "http://localhost:11434"
+  model: "qwen2.5:7b"
+  temperature: 0.3
+  max_tokens: 2000
+
+suricata:
+  log_path: "/var/log/suricata/eve.json"
+  rules_path: "/etc/suricata/rules"
+  custom_rules_path: "./rules/custom"
+  
+hexstrike:
+  log_path: "./logs/hexstrike"
+  
+detection:
+  alert_threshold: 5
+  time_window: 300  # 5분
+  severity_weights:
+    critical: 10
+    high: 5
+    medium: 2
+    low: 1
+
+auto_response:
+  enabled: true
+  block_threshold: 20
+  whitelist:
+    - "127.0.0.1"
+    - "localhost"
+```
+
+### dashboard/config.py
+
+```python
+import os
+
+class Config:
+    SECRET_KEY = os.environ.get('SECRET_KEY') or 'dev-secret-key-change-in-production'
+    
+    # FastAPI 백엔드
+    API_URL = 'http://localhost:8000'
+    
+    # 세션
+    SESSION_COOKIE_SECURE = True
+    SESSION_COOKIE_HTTPONLY = True
+    PERMANENT_SESSION_LIFETIME = 3600  # 1시간
+    
+    # MFA 설정
+    MFA_ENABLED = True
+    MFA_ISSUER_NAME = "Security Dashboard"
+    
+    # 대시보드
+    ITEMS_PER_PAGE = 50
+    CHART_UPDATE_INTERVAL = 5  # 초
+    
+    # 보고서
+    REPORT_FORMATS = ['pdf', 'html', 'json']
+    REPORT_DIRECTORY = './reports'
+```
+
+## 🔐 보안 설정
+
+### MFA 초기 설정
+
+```python
+# 관리자 계정 생성 시 QR 코드 생성
+import pyotp
+import qrcode
+
+# TOTP 시크릿 생성
+secret = pyotp.random_base32()
+
+# QR 코드 생성
+uri = pyotp.totp.TOTP(secret).provisioning_uri(
+    name='admin@security-dashboard',
+    issuer_name='Security Dashboard'
+)
+
+qr = qrcode.make(uri)
+qr.save('admin_mfa_qr.png')
+
+print(f"Secret: {secret}")
+print("Google Authenticator로 QR 코드 스캔하세요!")
+```
+
+## 📊 포트 사용
+
+| 서비스 | 포트 | 설명 |
+|--------|------|------|
+| 취약한 웹 (Frontend) | 3000 | 테스트용 프론트엔드 |
+| 취약한 웹 (Backend) | 5000 | 테스트용 백엔드 |
+| FastAPI Backend | 8000 | REST API |
+| Flask Dashboard | 8080 | 웹 대시보드 |
+| MCP Server | 9000 | MCP 프로토콜 |
+| Ollama | 11434 | AI 모델 서버 |
+
+## 🧪 테스트
+
+```bash
+# 단위 테스트
+pytest tests/
+
+# API 테스트
+curl http://localhost:8000/api/logs/recent
+
+# 공격 시뮬레이션 (HexStrike)
+# Red Team 서버에서 실행
+hexstrike attack --target http://blue-team-ip:3000
+```
+
+## 📝 다음 단계
+
+1. **MCP 서버 구현** - Suricata 및 HexStrike 로그 수집
+2. **AI 에이전트 구현** - Ollama 기반 로그 분석 및 룰 생성
+3. **FastAPI 백엔드 구현** - REST API 및 WebSocket
+4. **Flask 대시보드 구현** - SIEM 스타일 UI
+5. **취약한 웹 서버 구현** - 테스트 환경
+6. **통합 테스트** - 전체 시스템 연동 테스트

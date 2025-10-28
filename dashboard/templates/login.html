@@ -1,0 +1,43 @@
+<!-- dashboard/templates/login.html -->
+{% extends "base_minimal.html" %}
+
+{% block content %}
+<div class="container">
+    <div class="row justify-content-center align-items-center" style="min-height: 80vh;">
+        <div class="col-md-4">
+            <div class="card shadow">
+                <div class="card-body p-5">
+                    <div class="text-center mb-4">
+                        <i class="bi bi-shield-lock" style="font-size: 3rem; color: #0d6efd;"></i>
+                        <h3 class="mt-3">Security Dashboard</h3>
+                        <p class="text-muted">로그인하여 시스템에 접근하세요</p>
+                    </div>
+                    
+                    <form method="POST" action="{{ url_for('login') }}">
+                        <div class="mb-3">
+                            <label for="username" class="form-label">사용자 이름</label>
+                            <input type="text" class="form-control" id="username" name="username" required autofocus>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label for="password" class="form-label">비밀번호</label>
+                            <input type="password" class="form-control" id="password" name="password" required>
+                        </div>
+                        
+                        <div class="mb-3 form-check">
+                            <input type="checkbox" class="form-check-input" id="remember">
+                            <label class="form-check-label" for="remember">로그인 상태 유지</label>
+                        </div>
+                        
+                        <button type="submit" class="btn btn-primary w-100">로그인</button>
+                    </form>
+                    
+                    <div class="text-center mt-3">
+                        <small class="text-muted">MFA가 활성화되어 있습니다</small>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

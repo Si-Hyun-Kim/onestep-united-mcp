@@ -1,0 +1,17 @@
+# systemd/security-dashboard.service
+[Unit]
+Description=Security Dashboard (Flask)
+After=network.target security-api.service
+Requires=security-api.service
+
+[Service]
+Type=simple
+User=your-user
+WorkingDirectory=/path/to/security-automation
+Environment="PATH=/path/to/security-automation/venv/bin"
+ExecStart=/path/to/security-automation/venv/bin/python3 dashboard/app.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

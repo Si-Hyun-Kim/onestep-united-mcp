@@ -1,0 +1,205 @@
+<!-- dashboard/templates/generate_report.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow">
+            <div class="card-header bg-success text-white">
+                <h4 class="mb-0">
+                    <i class="bi bi-plus-circle"></i> 새 보고서 생성
+                </h4>
+            </div>
+            <div class="card-body p-4">
+                <form method="POST" action="{{ url_for('generate_report') }}" id="reportForm">
+                    <!-- 기간 설정 -->
+                    <h5 class="mb-3">
+                        <i class="bi bi-calendar-range"></i> 분석 기간
+                    </h5>
+                    
+                    <div class="row mb-3">
+                        <div class="col-md-6">
+                            <label for="start_time" class="form-label">시작 날짜/시간</label>
+                            <input type="datetime-local" 
+                                   class="form-control" 
+                                   id="start_time" 
+                                   name="start_time" 
+                                   required>
+                        </div>
+                        <div class="col-md-6">
+                            <label for="end_time" class="form-label">종료 날짜/시간</label>
+                            <input type="datetime-local" 
+                                   class="form-control" 
+                                   id="end_time" 
+                                   name="end_time" 
+                                   required>
+                        </div>
+                    </div>
+                    
+                    <!-- 빠른 선택 -->
+                    <div class="mb-4">
+                        <label class="form-label">빠른 선택</label>
+                        <div class="btn-group w-100" role="group">
+                            <button type="button" class="btn btn-outline-secondary" onclick="setTimeRange(24)">
+                                최근 24시간
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setTimeRange(168)">
+                                최근 7일
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" onclick="setTimeRange(720)">
+                                최근 30일
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <hr>
+                    
+                    <!-- 보고서 유형 -->
+                    <h5 class="mb-3">
+                        <i class="bi bi-file-text"></i> 보고서 유형
+                    </h5>
+                    
+                    <div class="mb-4">
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" 
+                                   type="radio" 
+                                   name="report_type" 
+                                   id="summary" 
+                                   value="summary" 
+                                   checked>
+                            <label class="form-check-label" for="summary">
+                                <strong>Summary</strong> - 요약 보고서 (빠른 확인용)
+                            </label>
+                        </div>
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" 
+                                   type="radio" 
+                                   name="report_type" 
+                                   id="detailed" 
+                                   value="detailed">
+                            <label class="form-check-label" for="detailed">
+                                <strong>Detailed</strong> - 상세 보고서 (기술 분석용)
+                            </label>
+                        </div>
+                        <div class="form-check">
+                            <input class="form-check-input" 
+                                   type="radio" 
+                                   name="report_type" 
+                                   id="executive" 
+                                   value="executive">
+                            <label class="form-check-label" for="executive">
+                                <strong>Executive</strong> - 경영진용 보고서
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <hr>
+                    
+                    <!-- 포맷 선택 -->
+                    <h5 class="mb-3">
+                        <i class="bi bi-filetype-pdf"></i> 출력 포맷
+                    </h5>
+                    
+                    <div class="mb-4">
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" 
+                                   type="radio" 
+                                   name="format" 
+                                   id="pdf" 
+                                   value="pdf" 
+                                   checked>
+                            <label class="form-check-label" for="pdf">
+                                <i class="bi bi-file-earmark-pdf text-danger"></i> PDF
+                            </label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" 
+                                   type="radio" 
+                                   name="format" 
+                                   id="html" 
+                                   value="html">
+                            <label class="form-check-label" for="html">
+                                <i class="bi bi-filetype-html text-primary"></i> HTML
+                            </label>
+                        </div>
+                        <div class="form-check form-check-inline">
+                            <input class="form-check-input" 
+                                   type="radio" 
+                                   name="format" 
+                                   id="json" 
+                                   value="json">
+                            <label class="form-check-label" for="json">
+                                <i class="bi bi-filetype-json text-success"></i> JSON
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <hr>
+                    
+                    <!-- 제출 버튼 -->
+                    <div class="d-grid gap-2">
+                        <button type="submit" class="btn btn-success btn-lg">
+                            <i class="bi bi-check-circle"></i> 보고서 생성
+                        </button>
+                        <a href="{{ url_for('reports') }}" class="btn btn-outline-secondary">
+                            <i class="bi bi-x-circle"></i> 취소
+                        </a>
+                    </div>
+                </form>
+            </div>
+        </div>
+        
+        <!-- 도움말 -->
+        <div class="card mt-4">
+            <div class="card-body">
+                <h6><i class="bi bi-question-circle text-info"></i> 도움말</h6>
+                <ul class="small text-muted mb-0">
+                    <li><strong>PDF:</strong> 인쇄 및 공유에 적합 (권장)</li>
+                    <li><strong>HTML:</strong> 웹 브라우저에서 바로 확인 가능</li>
+                    <li><strong>JSON:</strong> 다른 시스템과 연동 또는 추가 분석용</li>
+                    <li>생성 시간: 약 10-30초 소요 (데이터 양에 따라 다름)</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 현재 시간을 기본값으로 설정
+document.addEventListener('DOMContentLoaded', function() {
+    const now = new Date();
+    const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    
+    // 포맷: YYYY-MM-DDTHH:MM
+    document.getElementById('end_time').value = formatDateTime(now);
+    document.getElementById('start_time').value = formatDateTime(yesterday);
+});
+
+function formatDateTime(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function setTimeRange(hours) {
+    const now = new Date();
+    const past = new Date(now.getTime() - hours * 60 * 60 * 1000);
+    
+    document.getElementById('end_time').value = formatDateTime(now);
+    document.getElementById('start_time').value = formatDateTime(past);
+}
+
+// 폼 제출 시 로딩 표시
+document.getElementById('reportForm').addEventListener('submit', function(e) {
+    const submitBtn = this.querySelector('button[type="submit"]');
+    submitBtn.disabled = true;
+    submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>생성 중...';
+    
+    showSpinner();
+});
+</script>
+{% endblock %}

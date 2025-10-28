@@ -1,0 +1,269 @@
+# vulnerable_app/frontend/index.html
+"""
+취약한 프론트엔드 (3000번 포트)
+"""
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vulnerable Web App - Test Target</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            padding: 20px;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 10px 50px rgba(0, 0, 0, 0.2);
+            max-width: 800px;
+            width: 100%;
+            padding: 40px;
+        }
+        
+        .warning {
+            background: #ff6b6b;
+            color: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+        
+        h1 {
+            color: #333;
+            margin-bottom: 10px;
+        }
+        
+        .subtitle {
+            color: #666;
+            margin-bottom: 30px;
+        }
+        
+        .section {
+            margin-bottom: 30px;
+            padding: 20px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        
+        h2 {
+            color: #667eea;
+            margin-bottom: 15px;
+            font-size: 1.2em;
+        }
+        
+        input, textarea {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            font-size: 14px;
+        }
+        
+        button {
+            background: #667eea;
+            color: white;
+            border: none;
+            padding: 12px 30px;
+            border-radius: 5px;
+            cursor: pointer;
+            font-size: 16px;
+            margin-top: 10px;
+        }
+        
+        button:hover {
+            background: #5568d3;
+        }
+        
+        .result {
+            margin-top: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 5px;
+            border-left: 4px solid #667eea;
+            display: none;
+        }
+        
+        .result.show {
+            display: block;
+        }
+        
+        .result.error {
+            border-left-color: #ff6b6b;
+            background: #ffe0e0;
+        }
+        
+        code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-family: monospace;
+        }
+        
+        .endpoint-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .endpoint-list li {
+            padding: 10px;
+            margin: 5px 0;
+            background: #f8f9fa;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="warning">
+            ⚠️ 이 웹 애플리케이션은 의도적으로 취약하게 설계되었습니다!<br>
+            보안 테스트 목적으로만 사용하세요. 실제 프로덕션 환경에서 사용 금지!
+        </div>
+        
+        <h1>🎯 Vulnerable Web Application</h1>
+        <p class="subtitle">Security Testing Target - Frontend (Port 3000) + Backend (Port 5000)</p>
+        
+        <!-- SQL Injection -->
+        <div class="section">
+            <h2>🔓 Login (SQL Injection)</h2>
+            <p>시도: <code>' OR '1'='1</code></p>
+            <input type="text" id="username" placeholder="Username" value="admin">
+            <input type="password" id="password" placeholder="Password" value="password">
+            <button onclick="testLogin()">Login</button>
+            <div id="loginResult" class="result"></div>
+        </div>
+        
+        <!-- XSS -->
+        <div class="section">
+            <h2>🔍 Search (XSS)</h2>
+            <p>시도: <code>&lt;script&gt;alert('XSS')&lt;/script&gt;</code></p>
+            <input type="text" id="searchQuery" placeholder="Search query" value="test">
+            <button onclick="testSearch()">Search</button>
+            <div id="searchResult" class="result"></div>
+        </div>
+        
+        <!-- Command Injection -->
+        <div class="section">
+            <h2>🌐 Ping (Command Injection)</h2>
+            <p>시도: <code>127.0.0.1; cat /etc/passwd</code></p>
+            <input type="text" id="pingHost" placeholder="Host to ping" value="127.0.0.1">
+            <button onclick="testPing()">Ping</button>
+            <div id="pingResult" class="result"></div>
+        </div>
+        
+        <!-- Path Traversal -->
+        <div class="section">
+            <h2>📁 File Read (Path Traversal)</h2>
+            <p>시도: <code>../../../etc/passwd</code></p>
+            <input type="text" id="fileName" placeholder="Filename" value="default.txt">
+            <button onclick="testFile()">Read File</button>
+            <div id="fileResult" class="result"></div>
+        </div>
+        
+        <!-- Available Endpoints -->
+        <div class="section">
+            <h2>📋 Available Endpoints</h2>
+            <ul class="endpoint-list">
+                <li><strong>POST</strong> /api/login - SQL Injection</li>
+                <li><strong>GET</strong> /api/search - XSS</li>
+                <li><strong>POST</strong> /api/ping - Command Injection</li>
+                <li><strong>GET</strong> /api/file - Path Traversal</li>
+                <li><strong>POST</strong> /api/deserialize - Insecure Deserialization</li>
+                <li><strong>POST</strong> /api/fetch - SSRF</li>
+                <li><strong>GET</strong> /api/admin - Weak Authentication</li>
+                <li><strong>GET</strong> /api/debug - Information Disclosure</li>
+            </ul>
+        </div>
+    </div>
+    
+    <script>
+        const API_BASE = 'http://localhost:5000';
+        
+        async function testLogin() {
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            const result = document.getElementById('loginResult');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/login`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({username, password})
+                });
+                
+                const data = await response.json();
+                result.textContent = JSON.stringify(data, null, 2);
+                result.className = data.success ? 'result show' : 'result show error';
+            } catch (error) {
+                result.textContent = 'Error: ' + error.message;
+                result.className = 'result show error';
+            }
+        }
+        
+        async function testSearch() {
+            const query = document.getElementById('searchQuery').value;
+            const result = document.getElementById('searchResult');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/search?q=${encodeURIComponent(query)}`);
+                const html = await response.text();
+                result.innerHTML = html;
+                result.className = 'result show';
+            } catch (error) {
+                result.textContent = 'Error: ' + error.message;
+                result.className = 'result show error';
+            }
+        }
+        
+        async function testPing() {
+            const host = document.getElementById('pingHost').value;
+            const result = document.getElementById('pingResult');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/ping`, {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({host})
+                });
+                
+                const data = await response.json();
+                result.textContent = JSON.stringify(data, null, 2);
+                result.className = data.success ? 'result show' : 'result show error';
+            } catch (error) {
+                result.textContent = 'Error: ' + error.message;
+                result.className = 'result show error';
+            }
+        }
+        
+        async function testFile() {
+            const filename = document.getElementById('fileName').value;
+            const result = document.getElementById('fileResult');
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/file?name=${encodeURIComponent(filename)}`);
+                const data = await response.json();
+                result.textContent = JSON.stringify(data, null, 2);
+                result.className = data.success ? 'result show' : 'result show error';
+            } catch (error) {
+                result.textContent = 'Error: ' + error.message;
+                result.className = 'result show error';
+            }
+        }
+    </script>
+</body>
+</html>

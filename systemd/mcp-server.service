@@ -1,0 +1,16 @@
+# systemd/mcp-server.service
+[Unit]
+Description=MCP Security Server
+After=network.target
+
+[Service]
+Type=simple
+User=your-user
+WorkingDirectory=/path/to/security-automation
+Environment="PATH=/path/to/security-automation/venv/bin"
+ExecStart=/path/to/security-automation/venv/bin/python3 mcp_server/mcp_server.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

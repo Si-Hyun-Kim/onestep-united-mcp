@@ -1,0 +1,157 @@
+<!-- dashboard/templates/setup_mfa.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-8">
+        <div class="card shadow">
+            <div class="card-header bg-primary text-white">
+                <h4 class="mb-0">
+                    <i class="bi bi-shield-lock"></i> 2단계 인증 (MFA) 설정
+                </h4>
+            </div>
+            <div class="card-body p-5">
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i>
+                    <strong>보안 강화!</strong> 2단계 인증을 활성화하면 로그인 시 추가 보안 코드가 필요합니다.
+                </div>
+                
+                <h5 class="mt-4">단계 1: 인증 앱 설치</h5>
+                <p>스마트폰에 다음 앱 중 하나를 설치하세요:</p>
+                <ul>
+                    <li><strong>Google Authenticator</strong> (권장)
+                        <a href="https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2" target="_blank">Android</a> | 
+                        <a href="https://apps.apple.com/app/google-authenticator/id388497605" target="_blank">iOS</a>
+                    </li>
+                    <li><strong>Microsoft Authenticator</strong>
+                        <a href="https://play.google.com/store/apps/details?id=com.azure.authenticator" target="_blank">Android</a> | 
+                        <a href="https://apps.apple.com/app/microsoft-authenticator/id983156458" target="_blank">iOS</a>
+                    </li>
+                    <li><strong>Authy</strong>
+                        <a href="https://authy.com/download/" target="_blank">모든 플랫폼</a>
+                    </li>
+                </ul>
+                
+                <hr class="my-4">
+                
+                <h5>단계 2: QR 코드 스캔</h5>
+                <p>인증 앱을 열고 아래 QR 코드를 스캔하세요:</p>
+                
+                <div class="text-center my-4">
+                    <div class="qr-code-container p-4 bg-light rounded d-inline-block">
+                        <img src="{{ qr_image }}" alt="MFA QR Code" class="img-fluid" style="max-width: 250px;">
+                    </div>
+                </div>
+                
+                <div class="alert alert-warning">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <strong>중요!</strong> QR 코드를 스캔할 수 없는 경우, 아래 시크릿 키를 수동으로 입력하세요:
+                    <div class="mt-2">
+                        <code class="fs-5">{{ secret }}</code>
+                        <button class="btn btn-sm btn-outline-secondary ms-2" onclick="copySecret('{{ secret }}')">
+                            <i class="bi bi-clipboard"></i> 복사
+                        </button>
+                    </div>
+                </div>
+                
+                <hr class="my-4">
+                
+                <h5>단계 3: 테스트</h5>
+                <p>앱에 표시된 6자리 코드를 입력하여 설정을 완료하세요:</p>
+                
+                <form method="POST" action="{{ url_for('verify_mfa') }}">
+                    <div class="row">
+                        <div class="col-md-6">
+                            <input type="text" 
+                                   class="form-control form-control-lg text-center" 
+                                   name="code" 
+                                   placeholder="000000"
+                                   maxlength="6"
+                                   pattern="[0-9]{6}"
+                                   required
+                                   style="font-size: 1.5rem; letter-spacing: 0.5rem;">
+                        </div>
+                        <div class="col-md-6">
+                            <button type="submit" class="btn btn-success btn-lg w-100">
+                                <i class="bi bi-check-circle"></i> 인증 및 활성화
+                            </button>
+                        </div>
+                    </div>
+                </form>
+                
+                <hr class="my-4">
+                
+                <div class="row mt-4">
+                    <div class="col-md-6">
+                        <h6><i class="bi bi-shield-check text-success"></i> MFA의 장점</h6>
+                        <ul class="small">
+                            <li>계정 보안 강화</li>
+                            <li>무단 접근 차단</li>
+                            <li>비밀번호 유출 시에도 안전</li>
+                        </ul>
+                    </div>
+                    <div class="col-md-6">
+                        <h6><i class="bi bi-info-circle text-info"></i> 주의사항</h6>
+                        <ul class="small">
+                            <li>시크릿 키를 안전하게 백업하세요</li>
+                            <li>휴대폰을 분실하면 접근 불가</li>
+                            <li>시간 동기화 필수</li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="text-center mt-4">
+                    <a href="{{ url_for('dashboard') }}" class="btn btn-outline-secondary">
+                        <i class="bi bi-arrow-left"></i> 나중에 설정
+                    </a>
+                </div>
+            </div>
+        </div>
+        
+        <!-- 백업 코드 (선택사항) -->
+        <div class="card shadow mt-4">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-key"></i> 백업 코드 (선택사항)
+                </h5>
+            </div>
+            <div class="card-body">
+                <p class="text-muted">
+                    휴대폰을 분실했을 때 사용할 수 있는 백업 코드입니다. 
+                    안전한 장소에 보관하세요.
+                </p>
+                <div class="bg-light p-3 rounded">
+                    <code>{{ secret }}</code>
+                </div>
+                <button class="btn btn-sm btn-primary mt-2" onclick="downloadBackupCode('{{ secret }}')">
+                    <i class="bi bi-download"></i> 백업 코드 다운로드
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function copySecret(secret) {
+    navigator.clipboard.writeText(secret).then(() => {
+        alert('시크릿 키가 클립보드에 복사되었습니다!');
+    }).catch(err => {
+        console.error('복사 실패:', err);
+    });
+}
+
+function downloadBackupCode(secret) {
+    const content = `Security Dashboard - MFA 백업 코드\n\n시크릿 키: ${secret}\n\n이 코드를 안전한 장소에 보관하세요.\n생성 일시: ${new Date().toLocaleString('ko-KR')}`;
+    
+    const blob = new Blob([content], { type: 'text/plain' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'mfa_backup_code.txt';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+}
+</script>
+{% endblock %}

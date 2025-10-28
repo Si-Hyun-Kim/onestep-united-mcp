@@ -1,0 +1,17 @@
+# systemd/security-api.service
+[Unit]
+Description=Security Dashboard API (FastAPI)
+After=network.target mcp-server.service
+Requires=mcp-server.service
+
+[Service]
+Type=simple
+User=your-user
+WorkingDirectory=/path/to/security-automation
+Environment="PATH=/path/to/security-automation/venv/bin"
+ExecStart=/path/to/security-automation/venv/bin/python3 api/main.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
