@@ -16,7 +16,7 @@ echo -e "${CYAN}"
 cat << "EOF"
 ╔═══════════════════════════════════════════════════════╗
 ║                                                       ║
-║     🛡️  SURICATA SECURITY MONITORING SYSTEM 🛡️       ║
+║     🛡️  SURICATA SECURITY MONITORING SYSTEM 🛡️         ║
 ║                                                       ║
 ║           One-Step Installation Wizard                ║
 ║                   Version 2.0.0                       ║

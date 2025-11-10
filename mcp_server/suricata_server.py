@@ -60,20 +60,20 @@ def log(*args, **kwargs):
 
 # ================== Suricata 모니터 ==================
 class SuricataMonitor:
-    """Suricata eve.json 실시간 tail 모니터"""
+    """Suricata eve.json 실시간 tail 모니터 (비동기, 논블로킹 I/O)"""
     
     def __init__(self, eve_log_path: str = EVE_LOG_PATH, backfill_lines: int = BACKFILL_LINES):
         self.eve_log_path = Path(eve_log_path)
         self.backfill_lines = max(0, backfill_lines)
-        self._fd: Optional[io.TextIOBase] = None
+        self._fd: Optional[io.BufferedReader] = None  # <--- 타입 변경
         self._inode: Optional[int] = None
         self.running = False
-    
+        self._buffer = b""  # <--- 바이트 버퍼 추가
+
     async def start(self):
         """모니터링 시작"""
         self.running = True
         
-        # 파일이 생길 때까지 대기
         while not self.eve_log_path.exists():
             log(f"[MCP] Waiting for {self.eve_log_path}...")
             await asyncio.sleep(1)
@@ -93,16 +93,27 @@ class SuricataMonitor:
                     continue
 
                 # 2. select를 사용해 non-blocking으로 읽기 가능 여부 확인
-                #    timeout=0 으로 설정하여 즉시 리턴 (블로킹 방지)
-                ready_to_read, _, _ = select.select([self._fd], [], [], 0)
+                ready_to_read, _, _ = select.select([self._fd], [], [], 0.01) # 10ms 타임아웃
 
                 if ready_to_read:
-                    # 3. 읽을 데이터가 있을 때만 drain 호출
-                    #    (파일 끝에 도달했거나, 새 라인이 있거나, 파일이 삭제된 경우)
-                    await self._drain_new_lines()
+                    # 3. 읽을 데이터가 있음: 논블로킹 read()로 청크 읽기
+                    data_chunk = self._fd.read(4096)
+                    
+                    if data_chunk:
+                        # 4. 버퍼에 추가하고, 완성된 라인만 처리
+                        self._buffer += data_chunk
+                        self._drain_buffer()
+                    else:
+                        # 5. read()가 b"" (empty bytes) 반환 = EOF.
+                        #    파일이 삭제/회전됨. 핸들러를 닫고 비워서 강제 재오픈.
+                        log("[MCP] ⚠ EOF (log rotated/truncated), forcing reopen...")
+                        self._fd.close()
+                        self._fd = None
+                        self._inode = None
+                        await asyncio.sleep(0.1) # 새 파일 생성 대기
                 else:
                     # 4. 읽을 데이터가 없으면 이벤트 루프에 제어권 반환
-                    await asyncio.sleep(0.1) # 폴링 간격
+                    await asyncio.sleep(0.05) # 폴링 간격
 
             except PermissionError:
                 log("[MCP] ❌ Permission denied reading eve.json")
@@ -110,44 +121,64 @@ class SuricataMonitor:
                 await asyncio.sleep(2)
             except FileNotFoundError:
                 log("[MCP] ⚠ eve.json not found (rotating?). Retrying...")
-                self._fd = None # 파일 핸들러 비우기
+                self._fd = None
                 self._inode = None
                 await asyncio.sleep(1)
             except Exception as e:
-                log(f"[MCP] ❌ Error reading eve.json: {e}")
+                log(f"[MCP] ❌ Error in monitor loop: {e}")
+                import traceback
+                log(traceback.format_exc()) # <--- 디버깅용 상세 에러 로그
                 await asyncio.sleep(0.5)
+
+    def _drain_buffer(self):
+        """버퍼에서 완성된 라인을 찾아 처리"""
+        # 마지막 줄바꿈 문자 위치 찾기
+        last_newline = self._buffer.rfind(b"\n")
+        if last_newline == -1:
+            # 버퍼에 완성된 라인이 없음
+            return
+
+        # 완성된 라인들만 추출
+        lines_to_process = self._buffer[:last_newline]
+        # 나머지 (미완성 라인)는 버퍼에 남김
+        self._buffer = self._buffer[last_newline + 1:]
+
+        # 라인 처리
+        for line_bytes in lines_to_process.splitlines():
+            line_str = line_bytes.decode("utf-8", errors="ignore")
+            self._consume_line(line_str)
             
-            await asyncio.sleep(0.01)  # CPU 보호
-    
     async def _open_file(self, initial=False):
-        """파일 열기 (백필 처리 포함)"""
-        self._fd = open(self.eve_log_path, "r", encoding="utf-8", errors="ignore")
+        """파일 열기 (백필 처리 포함) - 바이너리 모드로 변경"""
+        self._fd = open(self.eve_log_path, "rb") # <--- "r"이 아닌 "rb" (바이너리 읽기)
         stat = self.eve_log_path.stat()
         self._inode = stat.st_ino
+        self._buffer = b"" # 버퍼 초기화
         
         if initial and self.backfill_lines > 0:
             # 최근 N줄 백필
             try:
-                self._fd.seek(0, 2)  # 끝으로
+                self._fd.seek(0, 2) # 끝으로
                 size = self._fd.tell()
                 block = 4096
                 chunks = []
                 
-                # 역방향 읽기
+                # 역방향 읽기 (바이트 기준)
                 while size > 0 and len(chunks) < 1024:
                     step = min(block, size)
                     size -= step
                     self._fd.seek(size)
-                    data = self._fd.read(step)
+                    data = self._fd.read(step) # <--- 바이트 읽기
                     chunks.append(data)
-                    if data.count("\n") >= self.backfill_lines:
+                    if data.count(b"\n") >= self.backfill_lines: # <--- 바이트 \n 카운트
                         break
                 
-                # 최근 N줄 추출
-                buf = "".join(reversed(chunks))
+                # 최근 N줄 추출 (바이트 기준)
+                buf = b"".join(reversed(chunks))
                 lines = buf.splitlines()[-self.backfill_lines:]
-                for line in lines:
-                    self._consume_line(line)
+                for line_bytes in lines:
+                    line_str = line_bytes.decode("utf-8", errors="ignore")
+                    self._consume_line(line_str)
                 
                 log(f"[MCP] ✓ Backfilled {len(lines)} alerts")
             except Exception as e:
@@ -183,21 +214,11 @@ class SuricataMonitor:
                 pass
             await self._open_file()
     
-    async def _drain_new_lines(self):
-        """새 라인 읽기"""
-        if not self._fd:
-            return
-        
-        while True:
-            pos = self._fd.tell()
-            line = self._fd.readline()
-            if not line:
-                self._fd.seek(pos)  # 롤백
-                break
-            self._consume_line(line)
-    
+    # [참고] _drain_new_lines 메서드는 더 이상 사용되지 않습니다.
+    #      start 루프가 직접 read()와 _drain_buffer()를 호출합니다.
+
     def _consume_line(self, line: str):
-        """라인 파싱"""
+        """라인 파싱 (기존과 동일)"""
         s = line.strip()
         if not s:
             return
@@ -207,48 +228,40 @@ class SuricataMonitor:
         except json.JSONDecodeError:
             return
         
-        # alert 타입만 수집
+        # [!!!] 진단용 로그: 이 로그는 터미널에 출력되어야 합니다.
+        log(f"[MCP] Read event type: {event.get('event_type', 'unknown')}")
+
         if event.get("event_type") != "alert":
             return
         
         self._process_alert(event)
     
     def _process_alert(self, event: dict):
-        """알림 처리 및 저장"""
+        """알림 처리 및 저장 (기존과 동일)"""
         alert = event.get("alert", {}) or {}
         
-        # 정규화된 알림 정보
         info = {
-            # 메타 정보
             "timestamp": event.get("timestamp", ""),
             "flow_id": event.get("flow_id", 0),
-            
-            # 네트워크 정보
             "src_ip": event.get("src_ip", ""),
             "dest_ip": event.get("dest_ip", ""),
             "src_port": event.get("src_port", 0),
             "dest_port": event.get("dest_port", 0),
             "proto": event.get("proto", ""),
-            
-            # 알림 정보
             "category": alert.get("category", ""),
-            "severity": alert.get("severity", 3),  # 1=높음, 2=중간, 3=낮음
+            "severity": alert.get("severity", 3),
             "signature": alert.get("signature", ""),
             "signature_id": alert.get("signature_id", 0),
             "action": alert.get("action", ""),
-            
-            # 추가 정보
             "app_proto": event.get("app_proto", ""),
             "metadata": alert.get("metadata", {}),
         }
         
         alert_history.append(info)
         
-        # 메모리 보호: 최대 MAX_ALERTS개만 유지
         if len(alert_history) > MAX_ALERTS:
             del alert_history[:len(alert_history) - MAX_ALERTS]
         
-        # 높은 심각도는 로그 출력
         if info["severity"] <= 2:
             log(f"[ALERT] {info['severity']} | {info['src_ip']} → {info['dest_ip']} | {info['signature']}")
 
