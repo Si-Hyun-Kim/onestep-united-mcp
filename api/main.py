@@ -10,6 +10,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, Dict
 import json
+import re
 from pathlib import Path
 from datetime import datetime, timedelta
 from collections import Counter
@@ -29,8 +30,8 @@ app.add_middleware(
 )
 
 # 데이터 파일 경로
-ALERTS_FILE = "/var/log/suricata/eve.json"
-RULES_FILE = "/etc/suricata/rules/suricata.rules"
+ALERTS_FILE = Path("/var/log/suricata/eve.json")
+RULES_FILE = Path("/etc/suricata/rules/suricata.rules")
 
 # ================== 데이터 로드 함수 ==================
 
@@ -46,17 +47,66 @@ def load_alerts() -> list[dict]:
         print(f"[API] ❌ 알림 로드 실패: {e}")
         return []
 
+def parse_rule_metadata(metadata_str: str) -> dict:
+    """룰의 ( ) 안에 있는 메타데이터를 파싱하는 헬퍼 함수"""
+    meta_dict = {}
+    try:
+        # (msg:"..."; sid:123; rev:1; ... )
+        # 정규표현식을 사용해 key:"value"; 또는 key:value; 형태를 찾음
+        pairs = re.findall(r'([\w\.-]+):(?:\"(.*?)\"|([^;]+));', metadata_str)
+        for pair in pairs:
+            key = pair[0]
+            # 따옴표가 있는 값(pair[1])이 우선, 없으면 따옴표 없는 값(pair[2])
+            value = pair[1] if pair[1] else pair[2].strip()
+            meta_dict[key] = value
+    except Exception as e:
+        print(f"[API] ⚠️ 메타데이터 파싱 에러: {e} | on: {metadata_str[:50]}...")
+    return meta_dict
+
 def load_rules() -> list[dict]:
-    """생성된 룰 로드"""
+    """생성된 룰 로드 (JSON이 아닌 .rules 텍스트 파일 파서로 변경)"""
+    rules_list = []
     try:
         if RULES_FILE.exists():
             with open(RULES_FILE, "r") as f:
-                data = json.load(f)
-                return data.get("rules", [])
-        return []
+                for i, line in enumerate(f):
+                    line = line.strip()
+                    # 주석(#)이나 빈 줄 건너뛰기
+                    if not line or line.startswith('#'):
+                        continue
+                    
+                    try:
+                        # 룰을 공백 기준으로 분리 (첫 7개 요소가 중요)
+                        parts = line.split(maxsplit=6)
+                        if len(parts) < 7:
+                            print(f"[API] ⚠️ 룰 형식 오류 (7부분 미만): {line[:50]}...")
+                            continue 
+
+                        action = parts[0]
+                        metadata_str = parts[6] # (msg... 부터 끝까지
+                        
+                        # 메타데이터 파싱
+                        metadata = parse_rule_metadata(metadata_str)
+                        
+                        rules_list.append({
+                            "sid": metadata.get("sid", f"no-sid-{i}"),
+                            "action": action.lower(), # 'alert', 'drop' 등
+                            "message": metadata.get("msg", "N/A"),
+                            "category": metadata.get("classtype", "N/A"),
+                            "file": "suricata.rules", # 파일명
+                            "rule": line, # 전체 룰 텍스트
+                            # (선택) 타임스탬프 정보가 있다면 추가
+                            "timestamp": metadata.get("updated_at", metadata.get("created_at", "")) 
+                        })
+                    except Exception as e:
+                        print(f"[API] ⚠️ 룰 파싱 중 에러: {e} | 라인: {line[:50]}...")
+        else:
+            print(f"[API] ❌ 룰 파일 없음: {RULES_FILE}")
+            
     except Exception as e:
-        print(f"[API] ❌ 룰 로드 실패: {e}")
-        return []
+        print(f"[API] ❌ 룰 파일 읽기 실패: {e}")
+    
+    return rules_list
 
 # ================== API 엔드포인트 ==================
 
@@ -173,36 +223,16 @@ async def search_logs(query: str):
 
 @app.get("/api/rules/active")
 async def get_active_rules(category: str = "all"):
-    """활성 룰 조회 (AI 생성 룰 포함)"""
-    rules = load_rules()
+    """활성 룰 조회 (실제 파싱된 룰 사용)"""
     
-    # AI 생성 룰 변환
-    ai_rules = [
-        {
-            "sid": 9000000 + i,
-            "action": "alert",
-            "message": r.get("alert", "AI Generated Rule"),
-            "category": "ai-generated",
-            "file": r.get("file", "auto_generated.rules"),
-            "rule": r.get("rule", ""),
-            "timestamp": r.get("timestamp", "")
-        }
-        for i, r in enumerate(rules)
-    ]
+    all_rules = load_rules() # <--- 실제 파싱된 룰을 가져옴
+
+    if category != 'all' and category:
+        # category가 N/A인 경우를 대비해 .get() 사용
+        all_rules = [r for r in all_rules if r.get('category') == category]
     
-    # 기본 Suricata 룰 (예시)
-    default_rules = [
-        {"sid": 2100001, "action": "alert", "message": "ET SCAN Potential SSH Scan", "category": "attempted-recon", "file": "emerging-scan.rules"},
-        {"sid": 2100002, "action": "drop", "message": "ET MALWARE Botnet", "category": "trojan", "file": "emerging-malware.rules"},
-        {"sid": 2100003, "action": "alert", "message": "ET WEB_SERVER SQL Injection", "category": "web-application-attack", "file": "emerging-web.rules"},
-    ]
-    
-    all_rules = default_rules + ai_rules
-    
-    if category != 'all':
-        all_rules = [r for r in all_rules if r['category'] == category]
-    
-    return {"rules": all_rules}
+    # 프론트엔드가 total 값을 사용할 수 있도록 total도 함께 반환
+    return {"rules": all_rules, "total": len(all_rules)}
 
 @app.get("/api/rules/search")
 async def search_rules(query: str):

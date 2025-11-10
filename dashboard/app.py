@@ -213,36 +213,19 @@ def get_alerts():
 @app.route('/api/get-rules')
 @login_required
 def get_rules():
-    """룰 관리 페이지 데이터"""
-    rules_file = '/etc/suricata/rules/suricata.rules'
+    """룰 관리 페이지 데이터 (API 서버에서 가져오도록 수정)"""
     
-    try:
-        if os.path.exists(rules_file):
-            with open(rules_file, 'r') as f:
-                rules_list = []
-                for line in f:
-                    line = line.strip()
-                    # 주석이나 빈 줄 건너뛰기
-                    if not line or line.startswith('#'):
-                        continue
-                    
-                    # SID 추출
-                    if 'sid:' in line:
-                        sid_match = line.split('sid:')[1].split(';')[0].strip()
-                        msg_match = line.split('msg:"')[1].split('"')[0] if 'msg:"' in line else 'Unknown'
-                        
-                        rules_list.append({
-                            'sid': sid_match,
-                            'rule': line,
-                            'signature': msg_match,
-                            'file': 'suricata.rules'
-                        })
-                
-                return jsonify({'rules': rules_list, 'total': len(rules_list)})
-    except Exception as e:
-        print(f"Error reading rules file: {e}")
+    # API 서버에 활성 룰 요청
+    # /api/get-stats에서 사용하던 엔드포인트와 동일하게 맞춥니다.
+    data = api_request('/api/rules/active?category=all') 
     
-    return jsonify({'rules': []})
+    # API가 에러를 반환하거나 데이터가 없는 경우
+    if not data or 'error' in data:
+        print(f"API Error in /api/get-rules: {data.get('error')}")
+        return jsonify({'rules': [], 'total': 0})
+    
+    # API 응답 형식이 {"rules": [...], "total": N} 형태일 것
+    return jsonify(data)
 
 @app.route('/api/rules/<int:sid>', methods=['DELETE'])
 @login_required
