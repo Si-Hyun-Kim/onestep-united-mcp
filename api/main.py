@@ -36,16 +36,57 @@ RULES_FILE = Path("/etc/suricata/rules/suricata.rules")
 # ================== 데이터 로드 함수 ==================
 
 def load_alerts() -> list[dict]:
-    """알림 데이터 로드"""
+    """알림 데이터 로드 (JSONL 형식 .json 파일 파서로 변경 및 데이터 평탄화)"""
+    alerts_list = []
     try:
         if ALERTS_FILE.exists():
             with open(ALERTS_FILE, "r") as f:
-                data = json.load(f)
-                return data.get("alerts", [])
-        return []
+                for line in f:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    try:
+                        # 각 줄을 개별 JSON으로 파싱
+                        event_data = json.loads(line)
+                        
+                        # 'alert' 타입만 필터링
+                        if event_data.get("event_type") == "alert":
+                            
+                            alert_details = event_data.get('alert')
+                            if not alert_details:
+                                continue # alert 객체가 없는 경우 건너뛰기
+
+                            # (중요) 데이터를 평탄화(Flatten)하여 API의 다른 부분이 사용하기 쉽게 만듦
+                            alerts_list.append({
+                                "timestamp": event_data.get("timestamp"),
+                                "src_ip": event_data.get("src_ip"),
+                                "dest_ip": event_data.get("dest_ip"),
+                                "src_port": event_data.get("src_port"),
+                                "dest_port": event_data.get("dest_port"),
+                                "proto": event_data.get("proto"),
+                                
+                                # 'alert' 하위 객체에서 정보 추출
+                                "signature": alert_details.get("signature"),
+                                "severity": alert_details.get("severity"), # 1, 2, 3 등
+                                "category": alert_details.get("category"),
+                                
+                                # (선택) 원본 룰 SID
+                                "gid": alert_details.get("gid"),
+                                "sid": alert_details.get("signature_id") 
+                            })
+
+                    except json.JSONDecodeError as json_err:
+                        # 파일의 특정 줄 파싱 실패 (무시하고 계속)
+                        print(f"[API] ⚠️ 알림 JSONL 파싱 에러: {json_err} | 라인: {line[:100]}...")
+        else:
+             print(f"[API] ❌ 알림 파일 없음: {ALERTS_FILE}")
+             
     except Exception as e:
-        print(f"[API] ❌ 알림 로드 실패: {e}")
-        return []
+        print(f"[API] ❌ 알림 파일 읽기 실패: {e}")
+    
+    # data.get("alerts", []) 대신 파싱한 리스트를 직접 반환
+    return alerts_list
 
 def parse_rule_metadata(metadata_str: str) -> dict:
     """룰의 ( ) 안에 있는 메타데이터를 파싱하는 헬퍼 함수"""
