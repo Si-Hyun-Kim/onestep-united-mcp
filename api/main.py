@@ -29,7 +29,7 @@ app.add_middleware(
 )
 
 # 데이터 파일 경로
-ALERTS_FILE = "/var/log/suricata/fast.json"
+ALERTS_FILE = "/var/log/suricata/eve.json"
 RULES_FILE = "/etc/suricata/rules/suricata.rules"
 
 # ================== 데이터 로드 함수 ==================
@@ -71,7 +71,7 @@ async def root():
         "status": "running",
         "alerts_loaded": len(alerts),
         "rules_generated": len(rules),
-        "data_source": "MCP Server (data/alerts.json, data/rules.json)"
+        "data_source": "MCP Server (/var/log/suricata/eve.json, /etc/suricata/rules/suricata.rules)"
     }
 
 @app.get("/api/stats/overview")
