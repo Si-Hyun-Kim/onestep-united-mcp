@@ -84,11 +84,11 @@ else
     fi
 fi
 
-# eve.json 읽기 권한 확인
-if [ -r "/var/log/suricata/eve.json" ]; then
-    echo -e "  ${GREEN}✓${NC} eve.json 읽기 가능"
+# eve.json 읽기 권한 확인 (sudo로 확인해야 정확합니다)
+if sudo [ -r "/var/log/suricata/eve.json" ]; then
+    echo -e "  ${GREEN}✓${NC} eve.json (sudo) 읽기 가능"
 else
-    echo -e "  ${RED}✗${NC} eve.json 읽기 권한 없음"
+    echo -e "  ${RED}✗${NC} eve.json (sudo) 읽기 권한 없음"
     echo -e "  ${YELLOW}권한 설정: ./fix-permissions.sh${NC}"
     exit 1
 fi
@@ -156,14 +156,17 @@ mkdir -p .pids
 # [1/4] MCP Server 시작 중...
 echo -e "${GREEN}[▶ 1/4] MCP Server 시작 중...${NC}"
 
+# [!!!] venv 안의 python3 절대 경로를 정의합니다.
+VENV_PYTHON_PATH="$SCRIPT_DIR/venv/bin/python3"
+
 if [ ! -f "mcp_server/suricata_server.py" ]; then
-    echo -e "  ${RED}✗${NC} mcp_server/suricata_server.py 파일이 없습니다!"
+    echo -e "  ${RED}✗${NC} mcp_server/suricata_server.py 파일이 없습니다!"
     MCP_FAILED=true
 else
-    nohup python3 mcp_server/suricata_server.py > logs/mcp_server.log 2>&1 &
+    # [!!!] sudo로 venv의 python 경로를 명시하여 실행합니다.
+    nohup sudo "$VENV_PYTHON_PATH" mcp_server/suricata_server.py > logs/mcp_server.log 2>&1 &
     MCP_PID=$!
     echo $MCP_PID > .pids/mcp_server.pid
-    echo -e "  시작 PID: ${MCP_PID}"
     sleep 3
     
     # 로그 파일 확인으로 시작 여부 판단

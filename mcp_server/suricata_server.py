@@ -11,7 +11,6 @@ import sys
 import asyncio
 import json
 import io
-import select
 from pathlib import Path
 from typing import Any, Optional
 from datetime import datetime
