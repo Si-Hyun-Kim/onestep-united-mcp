@@ -1,0 +1,190 @@
+<!-- dashboard/templates/comparison.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2><i class="bi bi-diagram-3"></i> Red Team vs Blue Team 분석</h2>
+        <p class="text-muted">HexStrike AI 공격과 Suricata IPS 탐지 비교</p>
+    </div>
+</div>
+
+<!-- 시간 범위 선택 -->
+<div class="row mt-4">
+    <div class="col-md-6">
+        <form method="GET" action="{{ url_for('comparison') }}">
+            <div class="input-group">
+                <label class="input-group-text">분석 기간</label>
+                <select name="time_window" class="form-select">
+                    <option value="30" {% if time_window==30 %}selected{% endif %}>최근 30분</option>
+                    <option value="60" {% if time_window==60 %}selected{% endif %}>최근 1시간</option>
+                    <option value="180" {% if time_window==180 %}selected{% endif %}>최근 3시간</option>
+                    <option value="360" {% if time_window==360 %}selected{% endif %}>최근 6시간</option>
+                    <option value="1440" {% if time_window==1440 %}selected{% endif %}>최근 24시간</option>
+                </select>
+                <button class="btn btn-primary" type="submit">
+                    <i class="bi bi-search"></i> 분석
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 통계 카드 -->
+<div class="row mt-4">
+    <div class="col-md-3">
+        <div class="card border-danger">
+            <div class="card-body text-center">
+                <i class="bi bi-bug-fill text-danger" style="font-size: 2rem;"></i>
+                <h3 class="mt-2">{{ analysis.hexstrike_count or 0 }}</h3>
+                <p class="text-muted mb-0">총 공격 (Red Team)</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card border-info">
+            <div class="card-body text-center">
+                <i class="bi bi-shield-check text-info" style="font-size: 2rem;"></i>
+                <h3 class="mt-2">{{ analysis.suricata_count or 0 }}</h3>
+                <p class="text-muted mb-0">총 탐지 (Blue Team)</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card border-success">
+            <div class="card-body text-center">
+                <i class="bi bi-check-circle-fill text-success" style="font-size: 2rem;"></i>
+                <h3 class="mt-2">{{ analysis.detection_rate or 0 }}%</h3>
+                <p class="text-muted mb-0">탐지율</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card border-warning">
+            <div class="card-body text-center">
+                <i class="bi bi-exclamation-triangle-fill text-warning" style="font-size: 2rem;"></i>
+                <h3 class="mt-2">{{ analysis.matched_attacks|length or 0 }}</h3>
+                <p class="text-muted mb-0">매칭된 공격</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 상세 분석 -->
+<div class="row mt-4">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-danger text-white">
+                <h5 class="mb-0"><i class="bi bi-shield-x"></i> 탐지되지 않은 공격</h5>
+            </div>
+            <div class="card-body">
+                {% if analysis.undetected_attacks %}
+                <div class="alert alert-danger">
+                    <strong>주의!</strong> {{ analysis.undetected_attacks|length }}개의 공격이 탐지되지 않았습니다.
+                </div>
+                <ul class="list-group">
+                    {% for ip in analysis.undetected_attacks[:10] %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <code>{{ ip }}</code>
+                        <span class="badge bg-danger">미탐지</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-success"><i class="bi bi-check-circle"></i> 모든 공격이 탐지되었습니다!</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header bg-warning">
+                <h5 class="mb-0"><i class="bi bi-exclamation-triangle"></i> False Positives</h5>
+            </div>
+            <div class="card-body">
+                {% if analysis.false_positives %}
+                <div class="alert alert-warning">
+                    {{ analysis.false_positives|length }}개의 오탐이 발견되었습니다.
+                </div>
+                <ul class="list-group">
+                    {% for ip in analysis.false_positives[:10] %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <code>{{ ip }}</code>
+                        <span class="badge bg-warning">오탐</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <p class="text-success"><i class="bi bi-check-circle"></i> 오탐이 없습니다!</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 매칭된 공격 -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header bg-success text-white">
+                <h5 class="mb-0"><i class="bi bi-check-all"></i> 성공적으로 탐지된 공격</h5>
+            </div>
+            <div class="card-body">
+                {% if analysis.matched_attacks %}
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>IP 주소</th>
+                                <th>상태</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for ip in analysis.matched_attacks %}
+                            <tr>
+                                <td>{{ loop.index }}</td>
+                                <td><code>{{ ip }}</code></td>
+                                <td><span class="badge bg-success">탐지 완료</span></td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <p class="text-muted">매칭된 공격이 없습니다.</p>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 권장사항 -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0"><i class="bi bi-lightbulb"></i> 개선 권장사항</h5>
+            </div>
+            <div class="card-body">
+                <ul>
+                    {% if analysis.undetected_attacks %}
+                    <li><strong>탐지율 개선:</strong> {{ analysis.undetected_attacks|length }}개의 미탐지 공격에 대한 룰을 추가하세요.</li>
+                    {% endif %}
+                    {% if analysis.false_positives %}
+                    <li><strong>오탐 감소:</strong> {{ analysis.false_positives|length }}개의 오탐 룰을 조정하세요.</li>
+                    {% endif %}
+                    {% if analysis.detection_rate < 90 %}
+                    <li><strong>시그니처 업데이트:</strong> 탐지율이 {{ analysis.detection_rate }}%입니다. 룰을 업데이트하세요.</li>
+                    {% endif %}
+                    <li><strong>정기 분석:</strong> 이 비교 분석을 매일 실행하여 방어 성능을 모니터링하세요.</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

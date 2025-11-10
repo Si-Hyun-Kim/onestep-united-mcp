@@ -1,0 +1,176 @@
+<!-- dashboard/templates/logs.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2><i class="bi bi-file-text"></i> 로그 관리</h2>
+        <p class="text-muted">Suricata IPS 및 HexStrike AI 로그 조회</p>
+    </div>
+</div>
+
+<!-- 필터 -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="filter-section">
+            <form method="GET" action="{{ url_for('logs') }}" id="filterForm">
+                <div class="row">
+                    <div class="col-md-3">
+                        <label class="form-label">로그 소스</label>
+                        <select name="source" class="form-select">
+                            <option value="suricata" {% if source=='suricata' %}selected{% endif %}>Suricata IPS</option>
+                            <option value="hexstrike" {% if source=='hexstrike' %}selected{% endif %}>HexStrike AI</option>
+                        </select>
+                    </div>
+                    
+                    <div class="col-md-3">
+                        <label class="form-label">심각도</label>
+                        <select name="severity" class="form-select">
+                            <option value="all" {% if severity=='all' %}selected{% endif %}>전체</option>
+                            <option value="critical" {% if severity=='critical' %}selected{% endif %}>Critical</option>
+                            <option value="high" {% if severity=='high' %}selected{% endif %}>High</option>
+                            <option value="medium" {% if severity=='medium' %}selected{% endif %}>Medium</option>
+                            <option value="low" {% if severity=='low' %}selected{% endif %}>Low</option>
+                        </select>
+                    </div>
+                    
+                    <div class="col-md-3">
+                        <label class="form-label">표시 개수</label>
+                        <select name="count" class="form-select">
+                            <option value="50" {% if count==50 %}selected{% endif %}>50</option>
+                            <option value="100" {% if count==100 %}selected{% endif %}>100</option>
+                            <option value="200" {% if count==200 %}selected{% endif %}>200</option>
+                        </select>
+                    </div>
+                    
+                    <div class="col-md-3 d-flex align-items-end">
+                        <button type="submit" class="btn btn-primary me-2">
+                            <i class="bi bi-funnel"></i> 필터 적용
+                        </button>
+                        <a href="{{ url_for('logs') }}" class="btn btn-secondary">
+                            <i class="bi bi-x-circle"></i> 초기화
+                        </a>
+                    </div>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<!-- 검색 -->
+<div class="row mt-3">
+    <div class="col-12">
+        <form method="GET" action="{{ url_for('logs_search') }}">
+            <div class="input-group">
+                <input type="text" name="q" class="form-control" placeholder="IP 주소, 시그니처, 공격 유형 등으로 검색...">
+                <button class="btn btn-primary" type="submit">
+                    <i class="bi bi-search"></i> 검색
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- 로그 테이블 -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <span class="realtime-indicator"></span>
+                    {{ source|upper }} 로그 ({{ logs|length }}개)
+                </h5>
+                <button class="btn btn-sm btn-outline-primary" onclick="location.reload()">
+                    <i class="bi bi-arrow-clockwise"></i> 새로고침
+                </button>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>시간</th>
+                                <th>소스 IP</th>
+                                <th>대상 IP</th>
+                                <th>시그니처/공격 유형</th>
+                                <th>심각도</th>
+                                <th>작업</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for log in logs %}
+                            <tr>
+                                <td>{{ log.timestamp|datetime }}</td>
+                                <td><code>{{ log.src_ip or log.source_ip }}</code></td>
+                                <td><code>{{ log.dest_ip or log.target }}</code></td>
+                                <td>{{ log.signature or log.attack_type }}</td>
+                                <td>
+                                    <span class="badge bg-{{ log.severity|severity_color }}">
+                                        {{ log.severity|upper }}
+                                    </span>
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-info" onclick='showLogDetail({{ log|tojson }})'>
+                                        <i class="bi bi-eye"></i> 상세
+                                    </button>
+                                    <button class="btn btn-sm btn-danger" onclick="blockIP('{{ log.src_ip or log.source_ip }}')">
+                                        <i class="bi bi-shield-x"></i> 차단
+                                    </button>
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center py-4">
+                                    <i class="bi bi-inbox" style="font-size: 3rem; color: #ccc;"></i>
+                                    <p class="mt-2 text-muted">로그가 없습니다</p>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 페이지네이션 -->
+{% if total_pages > 1 %}
+<nav aria-label="Page navigation">
+    <ul class="pagination">
+        <li class="page-item {% if page == 1 %}disabled{% endif %}">
+            <a class="page-link" href="?page={{ page - 1 }}&source={{ source }}&severity={{ severity }}">이전</a>
+        </li>
+        
+        {% for p in range(1, total_pages + 1) %}
+            {% if p == page or (p <= 3 or p >= total_pages - 2 or (p >= page - 1 and p <= page + 1)) %}
+            <li class="page-item {% if p == page %}active{% endif %}">
+                <a class="page-link" href="?page={{ p }}&source={{ source }}&severity={{ severity }}">{{ p }}</a>
+            </li>
+            {% elif p == 4 or p == total_pages - 3 %}
+            <li class="page-item disabled"><span class="page-link">...</span></li>
+            {% endif %}
+        {% endfor %}
+        
+        <li class="page-item {% if page == total_pages %}disabled{% endif %}">
+            <a class="page-link" href="?page={{ page + 1 }}&source={{ source }}&severity={{ severity }}">다음</a>
+        </li>
+    </ul>
+</nav>
+{% endif %}
+
+<!-- 로그 상세 모달 -->
+<div class="modal fade" id="logDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">로그 상세 정보</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="log-detail" id="logDetailContent"></div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

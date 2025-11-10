@@ -1,515 +1,250 @@
-# 🛡️ AI 기반 자동 보안 시스템
+# 🛡️ Suricata Security Monitoring System
 
-Suricata IPS와 HexStrike AI를 연동한 자동화된 보안 방어 시스템입니다.
+**SIEM 스타일 실시간 보안 모니터링 대시보드**
 
-## 🎯 주요 기능
-
-### 1. **MCP 기반 로그 수집**
-- Suricata IPS 로그 실시간 수집
-- HexStrike AI 공격 로그 수집
-- FastMCP 프로토콜 기반 통신
-
-### 2. **AI 기반 분석 및 자동 대응**
-- Ollama Qwen3 모델 사용
-- 로그 패턴 분석 및 위협 탐지
-- Suricata 룰 자동 생성
-- IP 자동 차단
-
-### 3. **SIEM 스타일 웹 대시보드**
-- 실시간 로그 모니터링
-- Red vs Blue 비교 분석
-- 보고서 자동 생성
-- MFA 인증 (Google Authenticator)
-
-### 4. **Red Team vs Blue Team**
-- HexStrike AI 공격 시뮬레이션
-- Suricata IPS 방어 성능 측정
-- 탐지율, False Positive 분석
+Suricata IPS와 MCP 서버를 활용한 완전한 보안 모니터링 솔루션입니다.
 
 ---
 
-## 📊 시스템 아키텍처
+## 🎯 주요 기능
 
-```
-┌─────────────── Red Team 서버 ───────────────┐
-│  HexStrike AI                               │
-│  → 공격 로그 생성                            │
-└────────────────┬────────────────────────────┘
-                 │ SSH/rsync로 로그 전송
-                 ↓
-┌─────────────── Blue Team 서버 ──────────────┐
-│  ┌──────────────────────────────────────┐  │
-│  │  취약한 웹 서버 (테스트 대상)         │  │
-│  │  - Frontend: 3000번 포트             │  │
-│  │  - Backend:  5000번 포트             │  │
-│  └──────────────────────────────────────┘  │
-│            ↓                                │
-│  ┌──────────────────────────────────────┐  │
-│  │  Suricata IPS                        │  │
-│  │  - 실시간 트래픽 모니터링             │  │
-│  │  - /var/log/suricata/eve.json       │  │
-│  └──────────────────────────────────────┘  │
-│            ↓                                │
-│  ┌──────────────────────────────────────┐  │
-│  │  FastMCP Server (9000번 포트)        │  │
-│  │  - Suricata & HexStrike 로그 수집    │  │
-│  │  - 룰 관리 API                       │  │
-│  └──────────────────────────────────────┘  │
-│            ↓                                │
-│  ┌──────────────────────────────────────┐  │
-│  │  AI Agent (Ollama Qwen3)             │  │
-│  │  - 로그 분석                         │  │
-│  │  - 룰 자동 생성                       │  │
-│  │  - IP 자동 차단                       │  │
-│  └──────────────────────────────────────┘  │
-│            ↓                                │
-│  ┌──────────────────────────────────────┐  │
-│  │  FastAPI Backend (8000번 포트)       │  │
-│  │  - REST API                          │  │
-│  │  - WebSocket                         │  │
-│  └──────────────────────────────────────┘  │
-│            ↓                                │
-│  ┌──────────────────────────────────────┐  │
-│  │  Flask Dashboard (8080번 포트)       │  │
-│  │  - SIEM 대시보드                     │  │
-│  │  - MFA 인증                          │  │
-│  │  - 보고서 생성                        │  │
-│  └──────────────────────────────────────┘  │
-└─────────────────────────────────────────────┘
-```
+### ✅ 현재 활성화
+
+- ✅ **실시간 대시보드** - 24시간 통계, 차트, 상위 위협
+- ✅ **로그 관리** - 조회, 검색, 필터링
+- ✅ **룰 관리** - Suricata 룰 조회
+- ✅ **IP 차단** - 원클릭 iptables 차단
+- ✅ **사용자 인증** - 로그인/로그아웃
+
+### 🚧 준비 중
+
+- 🚧 **Red vs Blue** - HexStrike AI (Ollama 필요)
+- 🚧 **AI 룰 생성** - Ollama 연동 후
+- 🚧 **보고서** - PDF/HTML 생성
 
 ---
 
 ## 🚀 빠른 시작
 
-### 1. 시스템 요구사항
-
 ```bash
-- Ubuntu 20.04+ / Debian 11+
-- Python 3.10+
-- Node.js 18+
-- 최소 4GB RAM
-- 10GB 디스크 공간
-```
+# 1. 설치
+./install.sh
 
-### 2. 한 번에 설치하기
+# 2. 시작
+./start.sh
 
-```bash
-# 1. 레포지토리 클론
-git clone <your-repo>
-cd security-automation
-
-# 2. 자동 설치 (모든 의존성 포함)
-chmod +x setup.sh
-./setup.sh
-
-# 설치되는 항목:
-# - Python 3.10+ 및 필수 패키지
-# - Node.js 18+
-# - Suricata IPS
-# - Ollama 및 Qwen3 모델
-# - 모든 Python/Node 패키지
-```
-
-### 3. HexStrike AI 로그 연동 (Red Team 서버)
-
-```bash
-# Red Team 서버에서 실행
-# 방법 1: rsync로 실시간 동기화
-rsync -avz --progress /var/log/hexstrike/ \
-  user@blue-team-ip:/path/to/security-automation/logs/hexstrike/
-
-# 방법 2: SSH 마운트
-sshfs user@blue-team-ip:/path/to/security-automation/logs/hexstrike \
-  /local/mount/point
-```
-
-### 4. 시스템 시작
-
-```bash
-# 방법 1: 한 번에 시작
-./start_all.sh
-
-# 방법 2: 개별 시작
-source venv/bin/activate
-
-# Ollama 서버 (백그라운드)
-nohup ollama serve > logs/ollama.log 2>&1 &
-
-# MCP Server
-python3 mcp_server/mcp_server.py
-
-# AI Agent
-python3 agent/security_agent.py
-
-# FastAPI
-python3 api/main.py
-
-# Flask Dashboard
-python3 dashboard/app.py
-```
-
-### 5. 대시보드 접속
-
-```
-http://localhost:8080
-
-기본 계정:
-- ID: admin
-- Password: admin123
-- MFA: 초기 로그인 후 설정
+# 3. 접속
+# http://localhost:8080
+# 로그인: admin / admin123
 ```
 
 ---
 
-## 📖 상세 사용법
+## 📡 접속 정보
 
-### 1. 대시보드 기능
+| 서비스 | URL | 용도 |
+|--------|-----|------|
+| **대시보드** | http://localhost:8080 | 웹 UI |
+| **API 문서** | http://localhost:8000/docs | Swagger UI |
+| **로그인** | admin / admin123 | 기본 계정 |
 
-#### **메인 대시보드**
-- 실시간 통계 (24시간)
+---
+
+## 🏗️ 아키텍처
+
+```
+브라우저 (8080)
+    ↓
+Flask Dashboard
+    ↓
+FastAPI Backend (8000)
+    ↓
+MCP Server
+    ↓
+Suricata IPS
+```
+
+---
+
+## 📂 프로젝트 구조
+
+```
+security_project/
+├── dashboard/          # Flask 웹 대시보드
+│   ├── app.py
+│   ├── templates/      # HTML 템플릿
+│   └── static/         # CSS, JS
+├── api/                # FastAPI 백엔드
+│   └── main.py
+├── mcp_server/         # MCP 서버
+│   └── suricata_server.py
+├── logs/               # 로그 파일
+├── install.sh          # 설치 스크립트
+├── start.sh            # 시작
+├── stop.sh             # 정지
+└── requirements.txt    # Python 패키지
+```
+
+---
+
+## 🔧 스크립트
+
+| 스크립트 | 설명 |
+|----------|------|
+| `./install.sh` | Suricata, Python 환경 설치 |
+| `./start.sh` | 모든 서비스 시작 |
+| `./stop.sh` | 모든 서비스 정지 |
+| `./restart.sh` | 재시작 |
+| `./status.sh` | 상태 확인 |
+| `./fix-permissions.sh` | 권한 수정 |
+
+---
+
+## 📊 대시보드 기능
+
+### 1. 메인 대시보드
+- 통계 카드 (알림, 공격, 탐지율, 룰)
 - 시간대별 알림 차트
 - 심각도 분포 차트
-- 상위 위협 IP 목록
-- 원클릭 IP 차단
+- 상위 위협 IP (차단 기능)
 
-#### **로그 페이지**
-```
-http://localhost:8080/logs
-```
-- Suricata / HexStrike 로그 조회
-- 심각도 필터링 (Critical/High/Medium/Low)
-- 검색 기능
+### 2. 로그 관리
+- Suricata 로그 조회
+- 심각도 필터 (Critical/High/Medium/Low)
+- 검색 (IP, 시그니처, 카테고리)
 - 페이지네이션
-- 로그 상세 정보
 
-#### **룰 관리**
-```
-http://localhost:8080/rules
-```
-- 활성 Suricata 룰 목록
-- 룰 추가/삭제
-- 룰 유효성 검증
-- AI 생성 룰 확인
+### 3. 룰 관리
+- 활성 Suricata 룰 조회
+- 카테고리별 필터
+- AI 생성 룰 구분
 
-#### **Red vs Blue 비교**
-```
-http://localhost:8080/analysis/comparison
-```
-- HexStrike 공격 vs Suricata 탐지
-- 탐지율 (Detection Rate)
-- False Positive/Negative
-- IP 기반 상관관계 분석
-- 시간대별 비교
+### 4. 보고서 (준비 중)
+- PDF/HTML/JSON 생성
+- Summary/Detailed/Executive 타입
 
-#### **보고서 생성**
-```
-http://localhost:8080/reports
-```
-- 기간 설정 (시작/종료)
-- 보고서 유형 선택
-  * Summary: 요약 보고서
-  * Detailed: 상세 보고서
-  * Executive: 경영진용 보고서
-- 포맷 선택 (PDF/HTML/JSON)
-- 다운로드 및 저장
+### 5. Red vs Blue (비활성화)
+- HexStrike AI 필요 (Ollama)
 
-### 2. API 사용
+---
 
-#### **로그 조회**
+## 🔌 API 엔드포인트
+
+### 통계
 ```bash
-# Suricata 최근 로그
-curl http://localhost:8000/api/logs/suricata/recent?count=50
-
-# HexStrike 최근 로그
-curl http://localhost:8000/api/logs/hexstrike/recent?count=50
-
-# 로그 검색
-curl "http://localhost:8000/api/logs/search?query=SQL&source=all"
+GET /api/stats/overview        # 전체 통계
+GET /api/stats/timeline        # 시간대별
+GET /api/stats/top-threats     # 상위 위협
 ```
 
-#### **IP 차단/해제**
+### 로그
 ```bash
-# IP 차단
-curl -X POST http://localhost:8000/api/action/block-ip \
-  -H "Content-Type: application/json" \
-  -d '{"ip": "203.0.113.10", "reason": "Suspicious activity"}'
-
-# IP 차단 해제
-curl -X POST http://localhost:8000/api/action/unblock-ip \
-  -H "Content-Type: application/json" \
-  -d '{"ip": "203.0.113.10"}'
-
-# 차단된 IP 목록
-curl http://localhost:8000/api/blocked-ips
+GET /api/logs/suricata         # 로그 조회
+GET /api/logs/search?query=    # 검색
 ```
 
-#### **룰 관리**
+### 액션
 ```bash
-# 활성 룰 조회
-curl http://localhost:8000/api/rules/active
-
-# 룰 추가
-curl -X POST http://localhost:8000/api/rules/add \
-  -H "Content-Type: application/json" \
-  -d '{
-    "rule_content": "alert tcp any any -> $HOME_NET 22 (msg:\"SSH Brute Force\"; threshold:type both,track by_src,count 5,seconds 60; sid:9000001; rev:1;)",
-    "description": "SSH brute force detection"
-  }'
-```
-
-#### **분석 API**
-```bash
-# Red vs Blue 비교
-curl "http://localhost:8000/api/analysis/compare?time_window=60"
-
-# 탐지 지표
-curl "http://localhost:8000/api/analysis/detection-metrics?hours=24"
-```
-
-### 3. AI 에이전트 설정
-
-```yaml
-# agent/config.yaml
-
-agent:
-  name: "SecurityAgent"
-  check_interval: 30  # 30초마다 분석
-
-ollama:
-  host: "http://localhost:11434"
-  model: "qwen2.5:7b"
-  temperature: 0.3  # 낮을수록 일관성 ↑
-  max_tokens: 2000
-
-detection:
-  alert_threshold: 5  # IP당 알림 임계값
-  time_window: 300    # 5분 시간 윈도우
-  severity_weights:
-    critical: 10
-    high: 5
-    medium: 2
-    low: 1
-
-auto_response:
-  enabled: true       # 자동 차단 활성화
-  block_threshold: 20 # 차단 점수 임계값
-  whitelist:
-    - "127.0.0.1"
-    - "localhost"
-    - "192.168.1.1"   # 신뢰하는 IP 추가
-```
-
-### 4. MFA 설정
-
-```bash
-# 1. 대시보드 로그인
-http://localhost:8080/login
-
-# 2. 우측 상단 프로필 → "MFA 설정"
-
-# 3. QR 코드 스캔
-#    - Google Authenticator (Android/iOS)
-#    - Microsoft Authenticator
-#    - Authy
-
-# 4. 6자리 코드 입력하여 활성화
-
-# 5. 다음 로그인부터 MFA 필수
+POST /api/action/block-ip      # IP 차단
+{
+  "ip": "192.168.1.100",
+  "reason": "Malicious"
+}
 ```
 
 ---
 
-## 🧪 테스트
+## 🐛 문제 해결
 
-### 1. HexStrike AI 공격 시뮬레이션
-
+### "Page not found"
 ```bash
-# Red Team 서버에서 실행
-hexstrike attack --target http://blue-team-ip:3000 \
-  --attack-type sql_injection \
-  --count 10
-
-hexstrike attack --target http://blue-team-ip:3000 \
-  --attack-type xss \
-  --count 5
+./fix-permissions.sh
+./restart.sh
 ```
 
-### 2. 로그 확인
-
+### eve.json 읽기 오류
 ```bash
-# Suricata 로그 실시간 모니터링
-sudo tail -f /var/log/suricata/eve.json
-
-# AI 에이전트 로그
-tail -f logs/agent/actions.log
-
-# 대시보드 로그
-tail -f logs/dashboard/app.log
+sudo chmod 644 /var/log/suricata/eve.json
+sudo usermod -a -G adm $USER
+# 로그아웃 후 재로그인
 ```
 
-### 3. 탐지 성능 확인
-
+### FastAPI 시작 실패
 ```bash
-# API로 탐지율 확인
-curl http://localhost:8000/api/analysis/detection-metrics?hours=1
+tail -f logs/api.log
+lsof -i :8000  # 포트 충돌 확인
+```
 
-# 또는 대시보드에서
-http://localhost:8080/analysis/comparison
+### 로그 확인
+```bash
+tail -f logs/*.log              # 모든 로그
+tail -f logs/dashboard.log      # Dashboard
+tail -f logs/api.log            # API
+tail -f logs/mcp_server.log     # MCP
 ```
 
 ---
 
-## 🔧 문제 해결
+## 🔐 보안 (프로덕션)
 
-### 1. Ollama 연결 실패
-
+1. **SECRET_KEY 변경**
 ```bash
-# Ollama 상태 확인
-ollama list
-
-# Ollama 시작
-ollama serve
-
-# 모델 재다운로드
-ollama pull qwen2.5:7b
+export SECRET_KEY="your-random-key"
 ```
 
-### 2. Suricata 로그 없음
+2. **비밀번호 변경**
+- dashboard/app.py의 USERS 수정
 
+3. **HTTPS 사용**
+- Nginx + Let's Encrypt
+
+4. **방화벽**
 ```bash
-# Suricata 상태 확인
-sudo systemctl status suricata
+sudo ufw allow 8080/tcp
+```
 
-# Suricata 시작
-sudo systemctl start suricata
+---
 
-# 로그 파일 권한 확인
+## 📦 설치 상세
+
+### 자동 (권장)
+```bash
+./install.sh
+```
+
+### 수동
+```bash
+# Suricata
+sudo apt install suricata -y
+
+# Python
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# 권한
+sudo usermod -a -G adm $USER
 sudo chmod 644 /var/log/suricata/eve.json
 ```
 
-### 3. MCP 서버 연결 실패
+---
 
-```bash
-# 프로세스 확인
-ps aux | grep mcp_server
+## 📚 더 알아보기
 
-# 로그 확인
-tail -f logs/mcp_server.log
-
-# 재시작
-./restart_all.sh
-```
-
-### 4. 대시보드 로그인 불가
-
-```bash
-# Flask 로그 확인
-tail -f logs/dashboard/app.log
-
-# 비밀번호 재설정
-# dashboard/app.py에서 USERS 딕셔너리 수정
-```
+- [Suricata 문서](https://suricata.readthedocs.io/)
+- [FastAPI 문서](https://fastapi.tiangolo.com/)
+- [Flask 문서](https://flask.palletsprojects.com/)
 
 ---
 
-## 📊 성능 및 리소스
+## 💡 팁
 
-### 시스템 리소스 사용량
-
-| 컴포넌트 | CPU | 메모리 | 디스크 I/O |
-|----------|-----|--------|------------|
-| MCP Server | ~5% | ~100MB | 낮음 |
-| AI Agent | ~15% | ~500MB | 중간 |
-| Ollama | ~30% | ~2GB | 중간 |
-| FastAPI | ~5% | ~150MB | 낮음 |
-| Flask | ~5% | ~100MB | 낮음 |
-| **총합** | ~60% | ~3GB | 중간 |
-
-### 성능 최적화
-
-```yaml
-# agent/config.yaml에서 조정
-
-# CPU/메모리 부족 시
-agent:
-  check_interval: 60  # 60초로 증가
-
-ollama:
-  model: "qwen2.5:3b"  # 더 작은 모델 사용
-```
+- **더미 데이터**: FastAPI는 100개 더미 알림 자동 생성
+- **HexStrike**: Ollama 설치 후 활성화 예정
+- **로그**: `logs/` 디렉토리 확인
 
 ---
 
-## 🔐 보안 권장사항
-
-### 1. 프로덕션 배포 전
-
-```bash
-# 1. SECRET_KEY 변경
-# .env 파일 수정
-SECRET_KEY=<강력한-랜덤-키-생성>
-
-# 2. 기본 비밀번호 변경
-# dashboard/app.py의 USERS 수정
-
-# 3. MFA 활성화 필수
-MFA_ENABLED=True
-
-# 4. HTTPS 설정
-# Nginx 리버스 프록시 사용
-
-# 5. 방화벽 설정
-sudo ufw allow 8080/tcp  # Dashboard
-sudo ufw allow 8000/tcp  # API (선택)
-sudo ufw deny 9000/tcp   # MCP (외부 차단)
-```
-
-### 2. 화이트리스트 관리
-
-```yaml
-# agent/config.yaml
-auto_response:
-  whitelist:
-    - "127.0.0.1"
-    - "localhost"
-    - "192.168.1.0/24"     # 내부 네트워크
-    - "203.0.113.50"       # 신뢰하는 외부 IP
-    - "YOUR_ADMIN_IP"      # 관리자 IP 필수!
-```
-
----
-
-## 📚 추가 자료
-
-### 공식 문서
-- [FastMCP 문서](https://github.com/modelcontextprotocol/mcp)
-- [Suricata 문서](https://suricata.io/)
-- [Ollama 문서](https://ollama.ai/)
-- [HexStrike AI](https://hexstrike.ai/)
-
-### 커뮤니티
-- [Suricata Forum](https://forum.suricata.io/)
-- [MCP Discord](https://discord.gg/modelcontextprotocol)
-
----
-
-## 📝 라이선스
-
-MIT License
-
----
-
-## 🤝 기여
-
-이슈 및 풀 리퀘스트 환영합니다!
-
----
-
-## 📧 연락처
-
-문제가 있으면 이슈를 생성해주세요.
-
----
-
-**Happy Securing! 🛡️**
+**버전:** 2.0.0  
+**업데이트:** 2025-01-10  
+**라이선스:** MIT

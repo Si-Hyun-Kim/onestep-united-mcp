@@ -1,0 +1,201 @@
+<!-- dashboard/templates/reports.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2><i class="bi bi-file-earmark-pdf"></i> 보고서 관리</h2>
+        <p class="text-muted">보안 분석 보고서 생성 및 다운로드</p>
+    </div>
+</div>
+
+<!-- 새 보고서 생성 버튼 -->
+<div class="row mt-4">
+    <div class="col-12">
+        <a href="{{ url_for('generate_report') }}" class="btn btn-success btn-lg">
+            <i class="bi bi-plus-circle"></i> 새 보고서 생성
+        </a>
+    </div>
+</div>
+
+<!-- 생성된 보고서 목록 -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="bi bi-folder"></i> 생성된 보고서 ({{ reports|length }}개)
+                </h5>
+                <button class="btn btn-sm btn-outline-primary" onclick="location.reload()">
+                    <i class="bi bi-arrow-clockwise"></i> 새로고침
+                </button>
+            </div>
+            <div class="card-body p-0">
+                {% if reports %}
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>파일명</th>
+                                <th>크기</th>
+                                <th>생성 일시</th>
+                                <th>작업</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for report in reports %}
+                            <tr>
+                                <td>
+                                    <i class="bi bi-file-earmark-pdf text-danger"></i>
+                                    {{ report.filename }}
+                                </td>
+                                <td>{{ (report.size / 1024)|round(1) }} KB</td>
+                                <td>{{ report.created|datetime }}</td>
+                                <td>
+                                    <a href="/api/reports/download/{{ report.filename }}" 
+                                       class="btn btn-sm btn-primary"
+                                       download>
+                                        <i class="bi bi-download"></i> 다운로드
+                                    </a>
+                                    <button class="btn btn-sm btn-danger" 
+                                            onclick="deleteReport('{{ report.filename }}')">
+                                        <i class="bi bi-trash"></i> 삭제
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+                {% else %}
+                <div class="text-center py-5">
+                    <i class="bi bi-inbox" style="font-size: 4rem; color: #ccc;"></i>
+                    <p class="mt-3 text-muted">생성된 보고서가 없습니다</p>
+                    <a href="{{ url_for('generate_report') }}" class="btn btn-primary">
+                        <i class="bi bi-plus-circle"></i> 첫 보고서 생성하기
+                    </a>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 보고서 유형 안내 -->
+<div class="row mt-4">
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="bi bi-file-text text-primary"></i> Summary Report
+                </h5>
+                <p class="card-text text-muted small">
+                    주요 통계와 핵심 지표를 요약한 간단한 보고서입니다. 
+                    일일 점검이나 빠른 확인에 적합합니다.
+                </p>
+                <ul class="small">
+                    <li>전체 통계</li>
+                    <li>상위 위협</li>
+                    <li>탐지율</li>
+                    <li>권장사항</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="bi bi-file-earmark-text text-success"></i> Detailed Report
+                </h5>
+                <p class="card-text text-muted small">
+                    상세한 분석과 개별 공격 정보를 포함한 기술 보고서입니다. 
+                    보안 팀의 심층 분석에 적합합니다.
+                </p>
+                <ul class="small">
+                    <li>개별 로그 분석</li>
+                    <li>공격 패턴 분석</li>
+                    <li>시간대별 분포</li>
+                    <li>기술 권장사항</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card h-100">
+            <div class="card-body">
+                <h5 class="card-title">
+                    <i class="bi bi-briefcase text-warning"></i> Executive Report
+                </h5>
+                <p class="card-text text-muted small">
+                    비기술적 언어로 작성된 경영진용 보고서입니다. 
+                    의사결정자를 위한 핵심 정보만 포함합니다.
+                </p>
+                <ul class="small">
+                    <li>요약 통계</li>
+                    <li>위험 수준 평가</li>
+                    <li>예산 영향</li>
+                    <li>전략 권장사항</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 자동 보고서 설정 (향후 기능) -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">
+                    <i class="bi bi-clock-history"></i> 자동 보고서 (예정)
+                </h5>
+            </div>
+            <div class="card-body">
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle"></i>
+                    <strong>곧 출시!</strong> 자동으로 일일/주간/월간 보고서를 생성하는 기능이 곧 추가됩니다.
+                </div>
+                <p class="text-muted">예정된 기능:</p>
+                <ul class="text-muted">
+                    <li>일일 보고서 자동 생성 (매일 오전 9시)</li>
+                    <li>주간 요약 보고서 (매주 월요일)</li>
+                    <li>월간 종합 보고서 (매월 1일)</li>
+                    <li>이메일 자동 발송</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function deleteReport(filename) {
+    if (!confirm(`"${filename}" 보고서를 삭제하시겠습니까?`)) {
+        return;
+    }
+    
+    showSpinner();
+    
+    fetch(`/api/reports/delete/${filename}`, {
+        method: 'DELETE'
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showAlert('보고서가 삭제되었습니다', 'success');
+            setTimeout(() => location.reload(), 1000);
+        } else {
+            showAlert('삭제 실패: ' + data.error, 'error');
+        }
+    })
+    .catch(error => {
+        showAlert('삭제 요청 실패: ' + error, 'error');
+    })
+    .finally(() => {
+        hideSpinner();
+    });
+}
+</script>
+{% endblock %}

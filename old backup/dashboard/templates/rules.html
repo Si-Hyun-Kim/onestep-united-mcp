@@ -1,0 +1,166 @@
+
+
+<!-- dashboard/templates/rules.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2><i class="bi bi-shield-lock"></i> Suricata 룰 관리</h2>
+        <p class="text-muted">활성화된 탐지 룰 및 자동 생성 룰 관리</p>
+    </div>
+</div>
+
+<!-- 통계 -->
+<div class="row mt-4">
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body text-center">
+                <h3 class="text-primary">{{ rules|length }}</h3>
+                <p class="text-muted mb-0">활성 룰</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body text-center">
+                <h3 class="text-success">{{ rules|selectattr('file', 'equalto', 'auto_generated.rules')|list|length }}</h3>
+                <p class="text-muted mb-0">AI 생성 룰</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-body text-center">
+                <h3 class="text-info">{{ rules|selectattr('action', 'equalto', 'drop')|list|length }}</h3>
+                <p class="text-muted mb-0">차단 룰</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 필터 및 추가 버튼 -->
+<div class="row mt-4">
+    <div class="col-md-6">
+        <form method="GET" action="{{ url_for('rules') }}">
+            <div class="input-group">
+                <select name="category" class="form-select">
+                    <option value="all" {% if category=='all' %}selected{% endif %}>전체 카테고리</option>
+                    <option value="attempted-admin" {% if category=='attempted-admin' %}selected{% endif %}>Attempted Admin</option>
+                    <option value="web-application-attack" {% if category=='web-application-attack' %}selected{% endif %}>Web Attack</option>
+                    <option value="trojan" {% if category=='trojan' %}selected{% endif %}>Trojan</option>
+                    <option value="attempted-recon" {% if category=='attempted-recon' %}selected{% endif %}>Reconnaissance</option>
+                </select>
+                <button class="btn btn-primary" type="submit">
+                    <i class="bi bi-funnel"></i> 필터
+                </button>
+            </div>
+        </form>
+    </div>
+    <div class="col-md-6 text-end">
+        <a href="{{ url_for('add_rule') }}" class="btn btn-success">
+            <i class="bi bi-plus-circle"></i> 새 룰 추가
+        </a>
+    </div>
+</div>
+
+<!-- 룰 테이블 -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5 class="mb-0">활성 룰 목록</h5>
+            </div>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0">
+                        <thead>
+                            <tr>
+                                <th>SID</th>
+                                <th>Action</th>
+                                <th>Message</th>
+                                <th>Category</th>
+                                <th>파일</th>
+                                <th>작업</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for rule in rules %}
+                            <tr>
+                                <td><code>{{ rule.sid }}</code></td>
+                                <td>
+                                    <span class="badge bg-{% if rule.action == 'drop' %}danger{% else %}warning{% endif %}">
+                                        {{ rule.action|upper }}
+                                    </span>
+                                </td>
+                                <td>{{ rule.message }}</td>
+                                <td>{{ rule.category }}</td>
+                                <td>
+                                    <small class="text-muted">{{ rule.file }}</small>
+                                    {% if 'auto_generated' in rule.file %}
+                                    <span class="badge bg-success">AI</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-info" onclick='showRuleDetail({{ rule|tojson }})'>
+                                        <i class="bi bi-eye"></i>
+                                    </button>
+                                    {% if 'auto_generated' in rule.file %}
+                                    <button class="btn btn-sm btn-danger" onclick="deleteRule({{ rule.sid }})">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                    {% endif %}
+                                </td>
+                            </tr>
+                            {% else %}
+                            <tr>
+                                <td colspan="6" class="text-center py-4">룰이 없습니다</td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 룰 상세 모달 -->
+<div class="modal fade" id="ruleDetailModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">룰 상세 정보</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <div class="log-detail" id="ruleDetailContent"></div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function showRuleDetail(rule) {
+    const modal = new bootstrap.Modal(document.getElementById('ruleDetailModal'));
+    const content = document.getElementById('ruleDetailContent');
+    content.innerHTML = `<pre>${rule.rule || JSON.stringify(rule, null, 2)}</pre>`;
+    modal.show();
+}
+
+function deleteRule(sid) {
+    if (!confirm(`SID ${sid} 룰을 삭제하시겠습니까?`)) return;
+    
+    fetch(`/api/rules/${sid}`, {method: 'DELETE'})
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                showAlert('룰이 삭제되었습니다', 'success');
+                setTimeout(() => location.reload(), 1000);
+            } else {
+                showAlert('삭제 실패: ' + data.error, 'error');
+            }
+        });
+}
+</script>
+{% endblock %}

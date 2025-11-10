@@ -1,4 +1,5 @@
 """
+mcp/log_collectors.py
 Suricata와 HexStrike 로그 수집기
 """
 

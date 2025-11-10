@@ -1,0 +1,222 @@
+<!-- dashboard/templates/dashboard.html -->
+{% extends "base.html" %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <h2><i class="bi bi-speedometer2"></i> 대시보드</h2>
+        <p class="text-muted">실시간 보안 모니터링</p>
+    </div>
+</div>
+
+<!-- 통계 카드 -->
+<div class="row mt-4">
+    <div class="col-md-3">
+        <div class="card bg-danger text-white">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h6 class="card-subtitle mb-2">총 알림 (24h)</h6>
+                        <h2 class="card-title">{{ stats.get('total_alerts_24h', 0) }}</h2>
+                    </div>
+                    <div>
+                        <i class="bi bi-exclamation-triangle" style="font-size: 3rem; opacity: 0.5;"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card bg-warning text-dark">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h6 class="card-subtitle mb-2">총 공격 (24h)</h6>
+                        <h2 class="card-title">{{ stats.get('total_attacks_24h', 0) }}</h2>
+                    </div>
+                    <div>
+                        <i class="bi bi-bug" style="font-size: 3rem; opacity: 0.5;"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card bg-success text-white">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h6 class="card-subtitle mb-2">탐지율</h6>
+                        <h2 class="card-title">{{ stats.get('detection_rate', 0) }}%</h2>
+                    </div>
+                    <div>
+                        <i class="bi bi-check-circle" style="font-size: 3rem; opacity: 0.5;"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card bg-info text-white">
+            <div class="card-body">
+                <div class="d-flex justify-content-between">
+                    <div>
+                        <h6 class="card-subtitle mb-2">활성 룰</h6>
+                        <h2 class="card-title">{{ stats.get('active_rules_count', 0) }}</h2>
+                    </div>
+                    <div>
+                        <i class="bi bi-shield-lock" style="font-size: 3rem; opacity: 0.5;"></i>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 차트 -->
+<div class="row mt-4">
+    <div class="col-md-8">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-graph-up"></i> 시간대별 알림</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="timelineChart"></canvas>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-pie-chart"></i> 심각도 분포</h5>
+            </div>
+            <div class="card-body">
+                <canvas id="severityChart"></canvas>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 상위 위협 -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header d-flex justify-content-between">
+                <h5><i class="bi bi-shield-exclamation"></i> 상위 위협 IP</h5>
+                <button class="btn btn-sm btn-outline-primary" onclick="refreshTopThreats()">
+                    <i class="bi bi-arrow-clockwise"></i> 새로고침
+                </button>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-hover">
+                        <thead>
+                            <tr>
+                                <th>순위</th>
+                                <th>IP 주소</th>
+                                <th>알림 수</th>
+                                <th>위협 점수</th>
+                                <th>작업</th>
+                            </tr>
+                        </thead>
+                        <tbody id="topThreatsTable">
+                            {% for threat in top_threats.get('threats', []) %}
+                            <tr>
+                                <td>{{ loop.index }}</td>
+                                <td><code>{{ threat.ip }}</code></td>
+                                <td>{{ threat.count }}</td>
+                                <td>
+                                    <span class="badge bg-danger">{{ threat.severity_score }}</span>
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-danger" onclick="blockIP('{{ threat.ip }}')">
+                                        <i class="bi bi-shield-x"></i> 차단
+                                    </button>
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+// 차트 데이터
+const timelineData = {{ timeline.get('timeline', []) | tojson }};
+const severityData = {{ stats.get('severity_distribution', {}) | tojson }};
+
+// 시간대별 차트
+const ctxTimeline = document.getElementById('timelineChart').getContext('2d');
+new Chart(ctxTimeline, {
+    type: 'line',
+    data: {
+        labels: timelineData.map(d => d.time),
+        datasets: [{
+            label: '알림 수',
+            data: timelineData.map(d => d.count),
+            borderColor: 'rgb(220, 53, 69)',
+            backgroundColor: 'rgba(220, 53, 69, 0.1)',
+            tension: 0.4
+        }]
+    },
+    options: {
+        responsive: true,
+        plugins: {
+            legend: {
+                display: false
+            }
+        }
+    }
+});
+
+// 심각도 차트
+const ctxSeverity = document.getElementById('severityChart').getContext('2d');
+new Chart(ctxSeverity, {
+    type: 'doughnut',
+    data: {
+        labels: ['Critical', 'High', 'Medium', 'Low'],
+        datasets: [{
+            data: [
+                severityData.critical || 0,
+                severityData.high || 0,
+                severityData.medium || 0,
+                severityData.low || 0
+            ],
+            backgroundColor: [
+                'rgb(220, 53, 69)',
+                'rgb(255, 193, 7)',
+                'rgb(13, 202, 240)',
+                'rgb(108, 117, 125)'
+            ]
+        }]
+    }
+});
+
+// IP 차단 함수
+function blockIP(ip) {
+    if (confirm(`${ip}를 차단하시겠습니까?`)) {
+        $.ajax({
+            url: '/api/block-ip',
+            method: 'POST',
+            contentType: 'application/json',
+            data: JSON.stringify({ip: ip, reason: 'Manual block from dashboard'}),
+            success: function(response) {
+                if (response.success) {
+                    alert('IP가 성공적으로 차단되었습니다.');
+                    location.reload();
+                } else {
+                    alert('차단 실패: ' + response.error);
+                }
+            }
+        });
+    }
+}
+</script>
+{% endblock %}

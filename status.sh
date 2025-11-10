@@ -1,60 +1,37 @@
 #!/bin/bash
 # status.sh - 서비스 상태 확인
 
-echo "╔════════════════════════════════════════════════╗"
-echo "║  📊 AI Security System Status                 ║"
-echo "╚════════════════════════════════════════════════╝"
-echo ""
-
 GREEN='\033[0;32m'
 RED='\033[0;31m'
+YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}📊 서비스 상태${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
 check_service() {
-    SERVICE=$1
-    PIDFILE=".pids/$SERVICE.pid"
-    PORT=$2
-    
-    echo -n "  $SERVICE: "
-    
-    if [ -f "$PIDFILE" ]; then
-        PID=$(cat "$PIDFILE")
-        if kill -0 $PID 2>/dev/null; then
-            echo -e "${GREEN}✓ Running${NC} (PID: $PID)"
-            if [ ! -z "$PORT" ]; then
-                if lsof -Pi :$PORT -sTCP:LISTEN -t >/dev/null 2>&1; then
-                    echo "    Port $PORT: ${GREEN}✓ Listening${NC}"
-                fi
-            fi
-        else
-            echo -e "${RED}✗ Not running${NC}"
+    pidfile=".pids/${1}.pid"
+    if [ -f "$pidfile" ]; then
+        pid=$(cat "$pidfile")
+        if ps -p $pid > /dev/null 2>&1; then
+            echo -e "  ${2}: ${GREEN}● Running${NC} (PID: $pid)"
+            return 0
         fi
-    else
-        echo -e "${RED}✗ Not running${NC}"
     fi
+    echo -e "  ${2}: ${RED}● Stopped${NC}"
+    return 1
 }
 
-echo "서비스 상태:"
-check_service "mcp_server" 9000
-check_service "agent"
-check_service "api" 8000
-check_service "dashboard" 8080
+check_service "mcp_server" "MCP Server     "
+check_service "api" "FastAPI Backend"
+check_service "dashboard" "Flask Dashboard"
 
 echo ""
-echo "시스템 의존성:"
-
-echo -n "  Ollama: "
-if pgrep -x "ollama" > /dev/null; then
-    echo -e "${GREEN}✓ Running${NC}"
-else
-    echo -e "${RED}✗ Not running${NC}"
-fi
-
-echo -n "  Suricata: "
-if pgrep -x "Suricata-Main" > /dev/null || sudo systemctl is-active suricata > /dev/null 2>&1; then
-    echo -e "${GREEN}✓ Running${NC}"
-else
-    echo -e "${RED}✗ Not running${NC}"
-fi
-
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}🌐 URL${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "  Dashboard: ${GREEN}http://localhost:5000${NC}"
+echo -e "  API Docs : ${GREEN}http://localhost:8000/docs${NC}"
 echo ""

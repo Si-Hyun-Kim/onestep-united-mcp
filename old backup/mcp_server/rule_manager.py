@@ -1,4 +1,5 @@
 """
+mcp/rule_manager.py
 Suricata 룰 관리자
 자동 생성된 룰 관리 및 적용
 """
