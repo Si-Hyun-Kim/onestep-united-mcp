@@ -13,6 +13,12 @@ from datetime import datetime, timedelta
 import os
 from pathlib import Path
 
+# MFA Library
+# import pyotp
+# import qrcode
+# import io
+# import base64
+
 # Flask 앱 생성
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production-12345')
@@ -42,7 +48,9 @@ class User(UserMixin):
 USERS = {
     'admin': {
         'password': 'admin123',
-        'role': 'admin'
+        'role': 'admin',
+        'mfa_secret': None,      # MFA 시크릿 키(개발 단계에선 비활성화)
+        'mfa_enabled': False,    # MFA 활성화 여부(개발 단계에선 비활성화)
     }
 }
 
@@ -54,7 +62,7 @@ def load_user(user_id):
 
 # API 헬퍼 함수
 def api_request(endpoint, method='GET', data=None):
-    """FastAPI 백엔드 요청"""
+    # FastAPI 백엔드 요청
     url = f"{app.config['API_URL']}{endpoint}"
     try:
         if method == 'GET':
@@ -75,7 +83,7 @@ def api_request(endpoint, method='GET', data=None):
 # 인증 라우트
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    """로그인"""
+    # 로그인
     if request.method == 'POST':
         username = request.form.get('username')
         password = request.form.get('password')
@@ -83,16 +91,57 @@ def login():
         if username in USERS and USERS[username]['password'] == password:
             user = User(username, USERS[username])
             login_user(user)
+
+            # # MFA가 활성화되었는지 확인
+            # if user.has_mfa():
+            #     # MFA가 활성화된 경우, 임시 세션에 사용자 ID 저장
+            #     # 실제 로그인은 MFA 인증 후에 수행
+            #     session['mfa_user_id'] = user.id
+            #     return redirect(url_for('login_verify_mfa'))
+            
+            # MFA가 없는 경우, 바로 로그인
+            login_user(user)
             return redirect(url_for('dashboard'))
+
         
         flash('잘못된 사용자 이름 또는 비밀번호', 'error')
     
     return render_template('login.html')
 
+# # MFA 인증을 위한 라우트
+# @app.route('/login/verify-mfa', methods=['GET', 'POST'])
+# def login_verify_mfa():
+#     """로그인 시 MFA 코드 검증"""
+#     if 'mfa_user_id' not in session:
+#         return redirect(url_for('login'))
+    
+#     username = session['mfa_user_id']
+#     user_data = USERS.get(username)
+    
+#     if not user_data or not user_data.get('mfa_enabled'):
+#         session.pop('mfa_user_id', None)
+#         return redirect(url_for('login'))
+
+#     if request.method == 'POST':
+#         code = request.form.get('code')
+#         totp = pyotp.TOTP(user_data['mfa_secret'])
+        
+#         if totp.verify(code):
+#             # 인증 성공
+#             user = User(username, user_data)
+#             login_user(user)
+#             session.pop('mfa_user_id', None)
+#             return redirect(url_for('dashboard'))
+#         else:
+#             # 인증 실패
+#             flash('MFA 코드가 잘못되었습니다.', 'error')
+            
+#     return render_template('verify_mfa.html')
+
 @app.route('/logout')
 @login_required
 def logout():
-    """로그아웃"""
+    # 로그아웃
     logout_user()
     return redirect(url_for('login'))
 
@@ -100,13 +149,13 @@ def logout():
 @app.route('/')
 @login_required
 def index():
-    """메인"""
+    # 메인
     return redirect(url_for('dashboard'))
 
 @app.route('/dashboard')
 @login_required
 def dashboard():
-    """메인 대시보드"""
+    # 메인 대시보드
     stats = api_request('/api/stats/overview')
     timeline = api_request('/api/stats/timeline?hours=24')
     top_threats = api_request('/api/stats/top-threats?limit=10')
@@ -121,7 +170,7 @@ def dashboard():
 @app.route('/logs')
 @login_required
 def logs():
-    """로그 목록"""
+    # 로그 목록
     count = int(request.args.get('count', 50))
     severity = request.args.get('severity', 'all')
     page = int(request.args.get('page', 1))
@@ -177,7 +226,7 @@ def logs_search():
 @app.route('/rules')
 @login_required
 def rules():
-    """룰 관리"""
+    # 룰 관리
     category = request.args.get('category', 'all')
     rules_data = api_request(f'/api/rules/active?category={category}')
     
@@ -201,7 +250,7 @@ def reports():
 @app.route('/reports/generate', methods=['GET', 'POST'])
 @login_required
 def generate_report():
-    """보고서 생성"""
+    # 보고서 생성
     if request.method == 'POST':
         start_time = request.form.get('start_time')
         end_time = request.form.get('end_time')
@@ -227,7 +276,7 @@ def generate_report():
 @app.route('/comparison')
 @login_required
 def comparison():
-    """Red vs Blue 비교 분석 (비활성화)"""
+    # Red vs Blue 비교 분석 (비활성화)
     flash('HexStrike AI 기능은 현재 준비 중입니다. Ollama 모델 선택 후 활성화 예정입니다.', 'info')
     return render_template(
         'comparison.html',
@@ -243,18 +292,100 @@ def comparison():
         disabled=True
     )
 
+# 'settings' AND 'setup_mfa' ROUTES
+@app.route('/settings')
+@login_required
+def settings():
+    # 사용자 설정 페이지
+    return render_template('settings.html')
+
+@app.route('/setup-mfa')
+@login_required
+def setup_mfa():
+    # MFA 설정 페이지 (QR 생성; 현재는 비활성화)
+    if not app.config.get('MFA_ENABLED'):
+        flash('MFA 기능이 비활성화되어 있습니다.', 'info')
+        return redirect(url_for('settings'))
+    
+    if current_user.has_mfa():
+        flash('이미 MFA가 활성화되어 있습니다.', 'info')
+        return redirect(url_for('settings'))
+
+    # 새 시크릿 키 생성
+    secret = "DISABLED" # pyotp.random_base32()
+    
+    # 임시로 세션에 저장 (인증 완료 전까지)
+    session['mfa_temp_secret'] = secret
+
+    # 인증 앱에서 사용할 URI 생성
+    # provisioning_uri = pyotp.totp.TOTP(secret).provisioning_uri(
+    #     name=current_user.id,
+    #     issuer_name="Security Dashboard"
+    # )
+
+    # # QR 코드 생성
+    # qr = qrcode.QRCode(version=1, box_size=10, border=4)
+    # qr.add_data(provisioning_uri)
+    # qr.make(fit=True)
+    # img = qr.make_image(fill_color="black", back_color="white")
+    
+    # # QR 코드를 base64 문자열로 변환
+    # buffered = io.BytesIO()
+    # img.save(buffered, format="PNG")
+    # qr_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
+    
+    # return render_template(
+    #     'setup_mfa.html',
+    #     secret=secret,
+    #     qr_image=f"data:image/png;base64,{qr_image}"
+    # )
+
+# MFA 인증 코드 검증 라우트
+@app.route('/verify-mfa', methods=['POST'])
+@login_required
+def verify_mfa():
+    # MFA 설정 시 코드 검증(현재는 비활성화)
+    if not app.config.get('MFA_ENABLED'):
+        return redirect(url_for('settings'))
+    
+    if 'mfa_temp_secret' not in session:
+        flash('MFA 설정 세션이 만료되었습니다. 다시 시도하세요.', 'error')
+        return redirect(url_for('setup_mfa'))
+        
+    secret = session['mfa_temp_secret']
+    code = request.form.get('code')
+    
+    # totp = pyotp.TOTP(secret)
+    
+    # if totp.verify(code):
+    if False:   # 임시로 False 처리
+        # 인증 성공
+        # (실제로는 DB에 저장)
+        USERS[current_user.id]['mfa_secret'] = secret
+        USERS[current_user.id]['mfa_enabled'] = True
+        
+        # 임시 시크릿 제거
+        session.pop('mfa_temp_secret', None)
+        
+        flash('MFA가 성공적으로 활성화되었습니다!', 'success')
+        return redirect(url_for('settings'))
+    else:
+        # 인증 실패
+        flash('MFA 코드가 잘못되었습니다. 다시 시도하세요.', 'error')
+        return redirect(url_for('setup_mfa'))
+
 # API 엔드포인트 (AJAX용)
 @app.route('/api/realtime/stats')
 @login_required
 def realtime_stats():
-    """실시간 통계"""
+    # 실시간 통계
     stats = api_request('/api/stats/overview')
     return jsonify(stats if stats else {})
 
 @app.route('/api/block-ip', methods=['POST'])
 @login_required
 def block_ip_route():
-    """IP 차단"""
+    # IP 차단
     data = request.get_json()
     ip = data.get('ip')
     reason = data.get('reason', 'Blocked from dashboard')

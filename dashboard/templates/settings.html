@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}설정 - {{ super() }}{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1 class="mt-4">설정 (Settings)</h1>
+    <p class="lead">이곳은 사용자 설정 페이지입니다.</p>
+    
+    <!-- 나중에 여기에 설정 관련 폼 (예: 비밀번호 변경, API 키 관리 등)을 추가할 수 있습니다. -->
+    
+    <div class="card mt-4">
+        <div class="card-body">
+            <h5 class="card-title">계정 정보</h5>
+            <p><strong>사용자 ID:</strong> {{ current_user.id }}</p>
+            <p><strong>역할:</strong> {{ current_user.role }}</p>
+        </div>
+    </div>
+
+</div>
+{% endblock %}
