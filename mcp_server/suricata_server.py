@@ -11,6 +11,7 @@ import sys
 import asyncio
 import json
 import io
+import select
 from pathlib import Path
 from typing import Any, Optional
 from datetime import datetime
@@ -83,14 +84,34 @@ class SuricataMonitor:
         # 메인 루프
         while self.running:
             try:
+                # 1. 파일이 열려있는지, 회전되었는지 먼저 확인
                 await self._reopen_if_rotated()
-                await self._drain_new_lines()
+
+                if not self._fd:
+                    # 파일이 아직 (재)생성되지 않음
+                    await asyncio.sleep(0.5)
+                    continue
+
+                # 2. select를 사용해 non-blocking으로 읽기 가능 여부 확인
+                #    timeout=0 으로 설정하여 즉시 리턴 (블로킹 방지)
+                ready_to_read, _, _ = select.select([self._fd], [], [], 0)
+
+                if ready_to_read:
+                    # 3. 읽을 데이터가 있을 때만 drain 호출
+                    #    (파일 끝에 도달했거나, 새 라인이 있거나, 파일이 삭제된 경우)
+                    await self._drain_new_lines()
+                else:
+                    # 4. 읽을 데이터가 없으면 이벤트 루프에 제어권 반환
+                    await asyncio.sleep(0.1) # 폴링 간격
+
             except PermissionError:
                 log("[MCP] ❌ Permission denied reading eve.json")
                 log("[MCP] 💡 Fix: sudo chmod 644 /var/log/suricata/eve.json")
                 await asyncio.sleep(2)
             except FileNotFoundError:
                 log("[MCP] ⚠ eve.json not found (rotating?). Retrying...")
+                self._fd = None # 파일 핸들러 비우기
+                self._inode = None
                 await asyncio.sleep(1)
             except Exception as e:
                 log(f"[MCP] ❌ Error reading eve.json: {e}")
