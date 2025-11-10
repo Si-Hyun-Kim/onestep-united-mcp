@@ -31,7 +31,7 @@ HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/login)
 if [ "$HTTP_CODE" == "200" ]; then
     echo "✅ Dashboard 정상 동작 (HTTP $HTTP_CODE)"
     echo ""
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo "✅ 모든 테스트 통과!"
     echo ""
     echo "브라우저에서 접속하세요:"
@@ -40,7 +40,7 @@ if [ "$HTTP_CODE" == "200" ]; then
     echo "로그인 정보:"
     echo "👤 Username: admin"
     echo "🔑 Password: admin123"
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 else
     echo "❌ Dashboard 응답 없음 (HTTP $HTTP_CODE)"
     echo ""

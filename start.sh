@@ -18,7 +18,7 @@ cat << "EOF"
 ║                                                       ║
 ║     🚀 SURICATA SECURITY MONITORING SYSTEM 🚀        ║
 ║                                                       ║
-║              Service Startup Script                  ║
+║               Service Startup Script                  ║
 ║                                                       ║
 ╚═══════════════════════════════════════════════════════╝
 EOF
@@ -31,9 +31,9 @@ cd "$SCRIPT_DIR"
 # 사전 검사
 # ============================================
 
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}[사전 검사] 환경 확인 중...${NC}"
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
 # 가상환경 확인
 if [ ! -d "venv" ]; then
@@ -99,9 +99,9 @@ echo ""
 # 기존 프로세스 정리
 # ============================================
 
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}[정리] 기존 프로세스 확인 중...${NC}"
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
 # PID 파일 읽기
 declare -A PIDS
@@ -145,15 +145,15 @@ echo ""
 # 서비스 시작
 # ============================================
 
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}[시작] 서비스 시작 중...${NC}"
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
 
 # PID 저장 디렉토리
 mkdir -p .pids
 
-# [1/4] MCP Server 시작
+# [1/4] MCP Server 시작 중...
 echo -e "${GREEN}[▶ 1/4] MCP Server 시작 중...${NC}"
 
 if [ ! -f "mcp_server/suricata_server.py" ]; then
@@ -163,15 +163,29 @@ else
     nohup python3 mcp_server/suricata_server.py > logs/mcp_server.log 2>&1 &
     MCP_PID=$!
     echo $MCP_PID > .pids/mcp_server.pid
-    echo -e "  PID: ${MCP_PID}"
-    sleep 2
+    echo -e "  시작 PID: ${MCP_PID}"
+    sleep 3
     
-    if ps -p $MCP_PID > /dev/null 2>&1; then
+    # 로그 파일 확인으로 시작 여부 판단
+    if grep -q "Suricata MCP Server started" logs/mcp_server.log 2>/dev/null; then
         echo -e "  ${GREEN}✓${NC} MCP Server 실행 중"
+        # 실제 프로세스 PID 저장
+        ACTUAL_PID=$(pgrep -f "suricata_server.py" | head -1)
+        if [ ! -z "$ACTUAL_PID" ]; then
+            echo $ACTUAL_PID > .pids/mcp_server.pid
+        fi
     else
-        echo -e "  ${RED}✗${NC} MCP Server 시작 실패"
-        echo -e "  ${YELLOW}로그 확인: tail -f logs/mcp_server.log${NC}"
-        MCP_FAILED=true
+        # 추가 대기 후 프로세스 확인
+        sleep 2
+        if pgrep -f "suricata_server.py" > /dev/null; then
+            echo -e "  ${GREEN}✓${NC} MCP Server 실행 확인됨"
+            ACTUAL_PID=$(pgrep -f "suricata_server.py" | head -1)
+            [ ! -z "$ACTUAL_PID" ] && echo $ACTUAL_PID > .pids/mcp_server.pid
+        else
+            echo -e "  ${RED}✗${NC} MCP Server 시작 실패"
+            echo -e "  ${YELLOW}로그 확인: tail -f logs/mcp_server.log${NC}"
+            MCP_FAILED=true
+        fi
     fi
 fi
 
@@ -233,13 +247,14 @@ echo ""
 # 상태 요약
 # ============================================
 
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}📊 서비스 상태 요약${NC}"
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 
-# 각 서비스 상태 출력
-if [ -z "$MCP_FAILED" ] && [ ! -z "$MCP_PID" ] && ps -p $MCP_PID > /dev/null 2>&1; then
-    echo -e "  MCP Server      : ${GREEN}● Running${NC} (PID: $MCP_PID)"
+# 각 서비스 상태 출력 (프로세스 이름으로 확인)
+if [ -z "$MCP_FAILED" ] && pgrep -f "suricata_server.py" > /dev/null 2>&1; then
+    ACTUAL_MCP_PID=$(pgrep -f "suricata_server.py" | head -1)
+    echo -e "  MCP Server      : ${GREEN}● Running${NC} (PID: $ACTUAL_MCP_PID)"
 else
     echo -e "  MCP Server      : ${RED}● Stopped${NC}"
 fi
@@ -257,24 +272,24 @@ else
 fi
 
 echo ""
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}🌐 접속 정보${NC}"
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "  대시보드        : ${GREEN}http://localhost:8080${NC}"
 echo -e "  API 문서        : ${GREEN}http://localhost:8000/docs${NC}"
 echo -e "  로그인 정보     : ${YELLOW}admin / admin123${NC}"
 echo ""
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}📝 로그 확인${NC}"
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "  MCP Server      : ${YELLOW}tail -f logs/mcp_server.log${NC}"
 echo -e "  FastAPI         : ${YELLOW}tail -f logs/api.log${NC}"
 echo -e "  Dashboard       : ${YELLOW}tail -f logs/dashboard.log${NC}"
 echo -e "  모든 로그       : ${YELLOW}tail -f logs/*.log${NC}"
 echo ""
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}⚙️  제어 명령어${NC}"
-echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "  정지        : ${YELLOW}./stop.sh${NC}"
 echo -e "  재시작      : ${YELLOW}./restart.sh${NC}"
 echo -e "  상태 확인   : ${YELLOW}./status.sh${NC}"
@@ -301,9 +316,9 @@ read -p "실시간 로그를 보시겠습니까? (y/N) " -n 1 -r
 echo
 if [[ $REPLY =~ ^[Yy]$ ]]; then
     echo ""
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo -e "${BLUE}📝 실시간 로그 (Ctrl+C로 종료)${NC}"
-    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${CYAN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     echo ""
     tail -f logs/*.log
 fi
