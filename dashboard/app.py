@@ -6,7 +6,7 @@ HexStrike 비활성화 버전 (향후 사용 대비)
 """
 
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
-from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user, AnonymousUserMixin
 from functools import wraps
 import requests
 from datetime import datetime, timedelta
@@ -30,6 +30,15 @@ app.config['ITEMS_PER_PAGE'] = 50
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
+
+# AnonymousUserMixin has_mfa() 정의
+# 'AnonymousUserMixin' object' has no attribute 'has_mfa' 오류 수정을 위해
+# 로그인하지 않은 사용자(AnonymousUser)도 has_mfa() 메소드를 갖도록 설정
+class AnonymousUser(AnonymousUserMixin):
+    def has_mfa(self):
+        return False
+
+login_manager.anonymous_user = AnonymousUser
 
 # 간단한 사용자 클래스
 class User(UserMixin):
