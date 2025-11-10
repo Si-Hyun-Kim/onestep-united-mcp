@@ -27,9 +27,8 @@ app.add_middleware(
 )
 
 # 데이터 파일 경로
-DATA_DIR = Path("data")
-ALERTS_FILE = DATA_DIR / "alerts.json"
-RULES_FILE = DATA_DIR / "rules.json"
+ALERTS_FILE = "/var/log/suricata/fast.json"
+RULES_FILE = "/etc/suricata/rules/suricata.rules"
 
 # ================== 데이터 로드 함수 ==================
 
