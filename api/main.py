@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
+
 """
+api/main.py
 FastAPI Backend - 실제 데이터 버전
 MCP 서버가 저장한 data/alerts.json, data/rules.json 읽기
 """

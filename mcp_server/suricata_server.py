@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """
-Suricata MCP Server - 데이터 공유 버전
+Suricata MCP Server - 수정 버전
 - eve.json 실시간 모니터링
-- 알림 데이터를 data/alerts.json에 저장 (FastAPI와 공유)
-- 생성된 룰을 data/rules.json에 저장
+- 생성된 룰을 /etc/suricata/rules/suricata.rules에 직접 추가
+- 백업용으로 data/rules.json에도 저장
 - Ollama 자동 룰 생성
 """
 
@@ -42,7 +42,8 @@ else:
     config = {
         "suricata": {
             "eve_log_path": "/var/log/suricata/eve.json",
-            "rules_path": "/etc/suricata/rules"
+            "rules_path": "/etc/suricata/rules",
+            "main_rules_file": "/etc/suricata/rules/suricata.rules"  # 메인 룰 파일
         },
         "mcp_server": {
             "backfill_lines": 50,
@@ -59,6 +60,7 @@ else:
 
 EVE_LOG_PATH = config["suricata"]["eve_log_path"]
 RULES_PATH = config["suricata"]["rules_path"]
+MAIN_RULES_FILE = config["suricata"].get("main_rules_file", "/etc/suricata/rules/suricata.rules")
 BACKFILL_LINES = config["mcp_server"]["backfill_lines"]
 MAX_ALERTS = config["mcp_server"]["max_alerts"]
 AUTO_GENERATE = config["mcp_server"].get("auto_generate_rules", True)
@@ -88,7 +90,7 @@ def save_alerts():
         log(f"[Data] ❌ 알림 저장 실패: {e}")
 
 def save_rules():
-    """생성된 룰을 JSON 파일로 저장"""
+    """생성된 룰을 JSON 파일로 저장 (백업용)"""
     try:
         with open(RULES_FILE, "w") as f:
             json.dump({
@@ -186,8 +188,9 @@ Generate rule:"""
 
 # ================== 룰 관리자 ==================
 class RuleManager:
-    def __init__(self, rules_path: str = RULES_PATH):
+    def __init__(self, rules_path: str = RULES_PATH, main_rules_file: str = MAIN_RULES_FILE):
         self.rules_path = Path(rules_path)
+        self.main_rules_file = Path(main_rules_file)
         self.auto_rules_file = self.rules_path / "auto_generated.rules"
     
     async def add_rule(self, rule: str, alert_info: dict) -> bool:
@@ -196,33 +199,45 @@ class RuleManager:
             
             timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             
+            # 1. 메인 룰 파일(suricata.rules)에 추가 (가장 중요!)
+            try:
+                with open(self.main_rules_file, "a") as f:
+                    f.write(f"\n# Auto-generated: {timestamp}\n")
+                    f.write(f"# Alert: {alert_info.get('signature', 'Unknown')}\n")
+                    f.write(f"# Severity: {alert_info.get('severity')}\n")
+                    f.write(f"{rule}\n")
+                log(f"[Rules] ✓ 메인 룰 파일에 추가: {self.main_rules_file}")
+            except PermissionError:
+                log(f"[Rules] ❌ 메인 룰 파일 권한 거부: {self.main_rules_file}")
+                log(f"[Rules] 💡 'sudo chmod 666 {self.main_rules_file}' 실행 필요")
+                return False
+            
+            # 2. 백업용 auto_generated.rules에도 추가
             with open(self.auto_rules_file, "a") as f:
                 f.write(f"\n# Generated: {timestamp}\n")
                 f.write(f"# Alert: {alert_info.get('signature', 'Unknown')}\n")
                 f.write(f"# Severity: {alert_info.get('severity')}\n")
                 f.write(f"{rule}\n")
             
-            # 생성 기록 저장
+            # 3. 생성 기록 저장 (data/rules.json - 대시보드용)
             generated_rules.append({
                 "rule": rule,
                 "alert": alert_info.get('signature', 'Unknown'),
                 "severity": alert_info.get('severity'),
                 "timestamp": timestamp,
-                "file": "auto_generated.rules"
+                "file": "suricata.rules"
             })
             
-            # JSON 파일에 저장 (FastAPI와 공유)
+            # JSON 파일에 저장 (대시보드 백업)
             save_rules()
             
-            log(f"[Rules] ✓ 룰 추가: {self.auto_rules_file}")
+            log(f"[Rules] ✓ 백업 파일에도 저장: {self.auto_rules_file}")
             
+            # 4. Suricata 재로드
             await self._reload_suricata()
             
             return True
             
-        except PermissionError:
-            log(f"[Rules] ❌ 권한 거부")
-            return False
         except Exception as e:
             log(f"[Rules] ❌ 실패: {e}")
             return False
@@ -240,6 +255,8 @@ class RuleManager:
                 log("[Rules] ✓ 재시작 완료")
             else:
                 log(f"[Rules] ⚠ 재시작 실패: {result.stderr}")
+        except subprocess.TimeoutExpired:
+            log(f"[Rules] ❌ 재시작 타임아웃")
         except Exception as e:
             log(f"[Rules] ❌ 예외: {e}")
 
@@ -268,6 +285,7 @@ class SuricataMonitor:
         
         if AUTO_GENERATE and OLLAMA_ENABLED:
             log(f"[MCP] 🤖 자동 룰 생성 활성화 (심각도 <= {SEVERITY_THRESHOLD})")
+            log(f"[MCP] 📝 룰 저장 위치: {MAIN_RULES_FILE}")
         
         while self.running:
             try:
@@ -441,7 +459,9 @@ class SuricataMonitor:
                 if rule:
                     success = await self.rule_manager.add_rule(rule, info)
                     if success:
-                        log(f"[MCP] ✅ 룰 생성 & 추가 완료!")
+                        log(f"[MCP] ✅ 룰 생성 & 메인 파일 추가 완료!")
+                    else:
+                        log(f"[MCP] ❌ 룰 추가 실패 (권한 확인 필요)")
     
     async def stop(self):
         self.running = False
@@ -457,17 +477,27 @@ class SuricataMonitor:
 # ================== 메인 ==================
 async def main():
     log("=" * 60)
-    log("🛡️  Suricata MCP Server (데이터 공유)")
+    log("🛡️  Suricata MCP Server (메인 룰 파일 연동)")
     log("=" * 60)
     log(f"📁 Eve Log: {EVE_LOG_PATH}")
     log(f"📁 Rules Path: {RULES_PATH}")
-    log(f"💾 Alerts File: {ALERTS_FILE}")
-    log(f"💾 Rules File: {RULES_FILE}")
+    log(f"📝 Main Rules File: {MAIN_RULES_FILE}")
+    log(f"💾 Alerts Backup: {ALERTS_FILE}")
+    log(f"💾 Rules Backup: {RULES_FILE}")
     log(f"🤖 Ollama: {'Enabled' if OLLAMA_ENABLED else 'Disabled'}")
     if OLLAMA_ENABLED:
         log(f"   Model: {OLLAMA_MODEL}")
     log(f"⚡ Auto Gen: {'Enabled' if AUTO_GENERATE else 'Disabled'}")
     log("=" * 60)
+    
+    # 권한 체크
+    main_rules_path = Path(MAIN_RULES_FILE)
+    if main_rules_path.exists():
+        if not os.access(main_rules_path, os.W_OK):
+            log(f"⚠️  경고: {MAIN_RULES_FILE} 쓰기 권한 없음!")
+            log(f"💡 해결: sudo chmod 666 {MAIN_RULES_FILE}")
+    else:
+        log(f"⚠️  경고: {MAIN_RULES_FILE} 파일이 없습니다!")
     
     monitor = SuricataMonitor()
     

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """
+dashboard/app.py
 Flask 웹 대시보드 (SPA - Single Page Application)
 UI 재구성 버전 (v3 - 버그 수정 및 차트 추가)
 """
@@ -213,9 +214,35 @@ def get_alerts():
 @login_required
 def get_rules():
     """룰 관리 페이지 데이터"""
-    category = request.args.get('category', 'all')
-    data = api_request(f'/api/rules/active?category={category}')
-    return jsonify(data if data and 'error' not in data else {'rules': []})
+    rules_file = '/etc/suricata/rules/suricata.rules'
+    
+    try:
+        if os.path.exists(rules_file):
+            with open(rules_file, 'r') as f:
+                rules_list = []
+                for line in f:
+                    line = line.strip()
+                    # 주석이나 빈 줄 건너뛰기
+                    if not line or line.startswith('#'):
+                        continue
+                    
+                    # SID 추출
+                    if 'sid:' in line:
+                        sid_match = line.split('sid:')[1].split(';')[0].strip()
+                        msg_match = line.split('msg:"')[1].split('"')[0] if 'msg:"' in line else 'Unknown'
+                        
+                        rules_list.append({
+                            'sid': sid_match,
+                            'rule': line,
+                            'signature': msg_match,
+                            'file': 'suricata.rules'
+                        })
+                
+                return jsonify({'rules': rules_list, 'total': len(rules_list)})
+    except Exception as e:
+        print(f"Error reading rules file: {e}")
+    
+    return jsonify({'rules': []})
 
 @app.route('/api/rules/<int:sid>', methods=['DELETE'])
 @login_required
