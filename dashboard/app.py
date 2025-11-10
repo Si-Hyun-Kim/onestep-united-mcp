@@ -1,39 +1,27 @@
 #!/usr/bin/env python3
 """
-Flask 웹 대시보드
-SIEM 스타일 보안 모니터링 대시보드
-HexStrike 비활성화 버전 (향후 사용 대비)
+Flask 웹 대시보드 (SPA - Single Page Application)
+UI 재구성 버전 (v2 - rules, reports 포함)
 """
 
-from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash
+from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash, send_from_directory
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user, AnonymousUserMixin
-from functools import wraps
 import requests
-from datetime import datetime, timedelta
 import os
-from pathlib import Path
-
-# MFA Library
-# import pyotp
-# import qrcode
-# import io
-# import base64
 
 # Flask 앱 생성
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production-12345')
 app.config['API_URL'] = os.environ.get('API_URL', 'http://localhost:8000')
-app.config['MFA_ENABLED'] = False  # 개발 환경에서는 MFA 비활성화
+app.config['MFA_ENABLED'] = False
 app.config['ITEMS_PER_PAGE'] = 50
+app.config['REPORT_DIR'] = os.path.join(app.root_path, 'generated_reports') # 보고서 저장 경로 (예시)
 
 # LoginManager 설정
 login_manager = LoginManager()
 login_manager.init_app(app)
 login_manager.login_view = 'login'
 
-# AnonymousUserMixin has_mfa() 정의
-# 'AnonymousUserMixin' object' has no attribute 'has_mfa' 오류 수정을 위해
-# 로그인하지 않은 사용자(AnonymousUser)도 has_mfa() 메소드를 갖도록 설정
 class AnonymousUser(AnonymousUserMixin):
     def has_mfa(self):
         return False
@@ -48,7 +36,7 @@ class User(UserMixin):
         self.role = self.data.get('role', 'user')
     
     def has_mfa(self):
-        return False  # MFA 비활성화
+        return app.config['MFA_ENABLED'] and self.data.get('mfa_enabled', False)
     
     def is_admin(self):
         return self.role == 'admin'
@@ -56,10 +44,10 @@ class User(UserMixin):
 # 사용자 데이터 (실제로는 DB 사용)
 USERS = {
     'admin': {
-        'password': 'admin123',
+        'password': 'admin',
         'role': 'admin',
-        'mfa_secret': None,      # MFA 시크릿 키(개발 단계에선 비활성화)
-        'mfa_enabled': False,    # MFA 활성화 여부(개발 단계에선 비활성화)
+        'mfa_secret': 'BASE32SECRETCODE',
+        'mfa_enabled': False, # 테스트를 위해 False로 둠
     }
 }
 
@@ -71,7 +59,6 @@ def load_user(user_id):
 
 # API 헬퍼 함수
 def api_request(endpoint, method='GET', data=None):
-    # FastAPI 백엔드 요청
     url = f"{app.config['API_URL']}{endpoint}"
     try:
         if method == 'GET':
@@ -83,355 +70,229 @@ def api_request(endpoint, method='GET', data=None):
         
         if response.status_code == 200:
             return response.json()
+        elif response.status_code == 204: # DELETE 성공 (No Content)
+             return {"success": True}
         else:
             return {"error": f"API error: {response.status_code}"}
     except Exception as e:
         print(f"API Error: {e}")
         return {"error": str(e)}
 
-# 인증 라우트
+# --- 인증 라우트 (AJAX 처리) ---
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    # 로그인
     if request.method == 'POST':
-        username = request.form.get('username')
-        password = request.form.get('password')
+        data = request.get_json()
+        username = data.get('username')
+        password = data.get('password')
         
         if username in USERS and USERS[username]['password'] == password:
             user = User(username, USERS[username])
-            login_user(user)
-
-            # # MFA가 활성화되었는지 확인
-            # if user.has_mfa():
-            #     # MFA가 활성화된 경우, 임시 세션에 사용자 ID 저장
-            #     # 실제 로그인은 MFA 인증 후에 수행
-            #     session['mfa_user_id'] = user.id
-            #     return redirect(url_for('login_verify_mfa'))
             
-            # MFA가 없는 경우, 바로 로그인
-            login_user(user)
-            return redirect(url_for('dashboard'))
-
+            if user.has_mfa():
+                session['mfa_user_id'] = user.id
+                return jsonify({"success": True, "mfa_required": True})
+            else:
+                login_user(user)
+                return jsonify({"success": True, "mfa_required": False})
         
-        flash('잘못된 사용자 이름 또는 비밀번호', 'error')
+        return jsonify({"success": False, "error": "Invalid credentials"}), 401
     
     return render_template('login.html')
 
-# # MFA 인증을 위한 라우트
-# @app.route('/login/verify-mfa', methods=['GET', 'POST'])
-# def login_verify_mfa():
-#     """로그인 시 MFA 코드 검증"""
-#     if 'mfa_user_id' not in session:
-#         return redirect(url_for('login'))
+@app.route('/verify-mfa-ajax', methods=['POST'])
+def verify_mfa_ajax():
+    if 'mfa_user_id' not in session:
+        return jsonify({"success": False, "error": "Session expired"}), 400
     
-#     username = session['mfa_user_id']
-#     user_data = USERS.get(username)
-    
-#     if not user_data or not user_data.get('mfa_enabled'):
-#         session.pop('mfa_user_id', None)
-#         return redirect(url_for('login'))
+    username = session['mfa_user_id']
+    user_data = USERS.get(username)
+    data = request.get_json()
+    code = data.get('code')
 
-#     if request.method == 'POST':
-#         code = request.form.get('code')
-#         totp = pyotp.TOTP(user_data['mfa_secret'])
-        
-#         if totp.verify(code):
-#             # 인증 성공
-#             user = User(username, user_data)
-#             login_user(user)
-#             session.pop('mfa_user_id', None)
-#             return redirect(url_for('dashboard'))
-#         else:
-#             # 인증 실패
-#             flash('MFA 코드가 잘못되었습니다.', 'error')
-            
-#     return render_template('verify_mfa.html')
+    if not user_data or not code:
+        return jsonify({"success": False, "error": "Invalid request"}), 400
+
+    # (테스트용) 123456 하드코딩 (pyotp 권장)
+    if code == '123456':
+        user = User(username, user_data)
+        login_user(user)
+        session.pop('mfa_user_id', None)
+        return jsonify({"success": True})
+    else:
+        return jsonify({"success": False, "error": "Invalid verification code"}), 401
 
 @app.route('/logout')
 @login_required
 def logout():
-    # 로그아웃
     logout_user()
     return redirect(url_for('login'))
 
-# 대시보드 라우트
-@app.route('/')
-@login_required
-def index():
-    # 메인
-    return redirect(url_for('dashboard'))
+# --- 메인 대시보드 ---
 
+@app.route('/')
 @app.route('/dashboard')
 @login_required
-def dashboard():
-    # 메인 대시보드
-    stats = api_request('/api/stats/overview')
-    timeline = api_request('/api/stats/timeline?hours=24')
-    top_threats = api_request('/api/stats/top-threats?limit=10')
-    
-    return render_template(
-        'dashboard.html',
-        stats=stats if stats and 'error' not in stats else {},
-        timeline=timeline if timeline and 'error' not in timeline else {'timeline': []},
-        top_threats=top_threats if top_threats and 'error' not in top_threats else {'threats': []}
-    )
+def index():
+    """메인 SPA 셸(Shell) 렌더링"""
+    return render_template('index.html')
 
-@app.route('/logs')
+# --- 데이터 제공 API 엔드포인트 ---
+
+@app.route('/api/get-stats')
 @login_required
-def logs():
-    # 로그 목록
-    count = int(request.args.get('count', 50))
-    severity = request.args.get('severity', 'all')
-    page = int(request.args.get('page', 1))
+def get_stats():
+    """대시보드 통계 데이터"""
+    stats = api_request('/api/stats/overview')
+    # 룰 통계도 추가 (rules.html에서 사용)
+    rules_data = api_request('/api/rules/active?category=all')
     
-    # Suricata 로그만 조회
+    stats_summary = stats if stats and 'error' not in stats else {}
+    rules_list = rules_data.get('rules', []) if rules_data else []
+    
+    stats_summary['active_rules_count'] = len(rules_list)
+    stats_summary['ai_rules_count'] = len([r for r in rules_list if 'auto_generated' in r.get('file', '')])
+    stats_summary['drop_rules_count'] = len([r for r in rules_list if r.get('action') == 'drop'])
+    
+    return jsonify(stats_summary)
+
+@app.route('/api/get-timeline')
+@login_required
+def get_timeline():
+    """대시보드 타임라인 차트 데이터"""
+    hours = request.args.get('hours', 24, type=int)
+    timeline = api_request(f'/api/stats/timeline?hours={hours}')
+    return jsonify(timeline if timeline and 'error' not in timeline else {'timeline': []})
+
+@app.route('/api/get-recent-alerts')
+@login_required
+def get_recent_alerts():
+    """대시보드 최근 알림 (상위 5개)"""
+    top_threats = api_request('/api/logs/suricata?count=5')
+    return jsonify(top_threats if top_threats and 'error' not in top_threats else {'logs': []})
+
+@app.route('/api/get-alerts')
+@login_required
+def get_alerts():
+    """알림 페이지 데이터 (필터링 포함)"""
+    count = request.args.get('count', 50, type=int)
+    severity = request.args.get('severity', 'all')
+    
     endpoint = f'/api/logs/suricata?count={count}'
     if severity != 'all':
         endpoint += f'&severity={severity}'
     
     logs_data = api_request(endpoint)
-    
-    # 페이지네이션
-    items_per_page = app.config['ITEMS_PER_PAGE']
-    logs = logs_data.get('logs', []) if logs_data and 'error' not in logs_data else []
-    total_pages = max(1, (len(logs) + items_per_page - 1) // items_per_page)
-    
-    start_idx = (page - 1) * items_per_page
-    end_idx = start_idx + items_per_page
-    page_logs = logs[start_idx:end_idx]
-    
-    return render_template(
-        'logs.html',
-        logs=page_logs,
-        source='suricata',
-        severity=severity,
-        page=page,
-        total_pages=total_pages,
-        count=count
-    )
+    return jsonify(logs_data if logs_data and 'error' not in logs_data else {'logs': []})
 
-@app.route('/logs/search')
+@app.route('/api/get-rules')
 @login_required
-def logs_search():
-    """로그 검색"""
-    query = request.args.get('q', '')
-    
-    if not query:
-        flash('검색어를 입력하세요', 'warning')
-        return redirect(url_for('logs'))
-    
-    results = api_request(f'/api/logs/search?query={query}')
-    
-    return render_template(
-        'logs.html',
-        logs=results.get('results', []) if results else [],
-        source='suricata',
-        severity='all',
-        page=1,
-        total_pages=1,
-        search_query=query
-    )
-
-@app.route('/rules')
-@login_required
-def rules():
-    # 룰 관리
+def get_rules():
+    """룰 관리 페이지 데이터"""
     category = request.args.get('category', 'all')
     rules_data = api_request(f'/api/rules/active?category={category}')
-    
-    return render_template(
-        'rules.html',
-        rules=rules_data.get('rules', []) if rules_data else [],
-        category=category
-    )
+    return jsonify(rules_data if rules_data and 'error' not in rules_data else {'rules': []})
 
-@app.route('/reports')
+@app.route('/api/rules/<int:sid>', methods=['DELETE'])
 @login_required
-def reports():
-    """보고서"""
-    reports_data = api_request('/api/reports/list')
+def delete_rule(sid):
+    """룰 삭제 (auto_generated 룰만)"""
+    # TODO: 실제 API 백엔드에 /api/rules/delete/{sid} 같은 엔드포인트가 필요함
+    # result = api_request(f'/api/rules/delete/{sid}', 'DELETE')
     
-    return render_template(
-        'reports.html',
-        reports=reports_data.get('reports', []) if reports_data else []
-    )
+    # 임시 응답 (성공한 척)
+    print(f"Simulating delete rule: {sid}")
+    result = {"success": True, "message": f"Rule {sid} deleted"}
+    return jsonify(result)
 
-@app.route('/reports/generate', methods=['GET', 'POST'])
+@app.route('/api/get-reports')
+@login_required
+def get_reports():
+    """보고서 목록"""
+    reports_data = api_request('/api/reports/list')
+    # reports.html 템플릿에 맞게 데이터 가공 (size, created 등)
+    # 예시: reports_data = {'reports': [{'filename': 'report.pdf', 'size': 12345, 'created': '...'}, ...]}
+    return jsonify(reports_data if reports_data and 'error' not in reports_data else {'reports': []})
+
+@app.route('/api/generate-report', methods=['POST'])
 @login_required
 def generate_report():
-    # 보고서 생성
-    if request.method == 'POST':
-        start_time = request.form.get('start_time')
-        end_time = request.form.get('end_time')
-        report_type = request.form.get('report_type', 'summary')
-        format_type = request.form.get('format', 'pdf')
-        
-        result = api_request('/api/reports/generate', 'POST', {
-            'start_time': start_time,
-            'end_time': end_time,
-            'report_type': report_type,
-            'format': format_type
-        })
-        
-        if result and result.get('success'):
-            flash('보고서가 생성되었습니다', 'success')
-            return redirect(url_for('reports'))
-        else:
-            flash(f"오류: {result.get('error', '알 수 없는 오류')}", 'error')
-    
-    return render_template('generate_report.html')
+    """보고서 생성"""
+    data = request.get_json()
+    result = api_request('/api/reports/generate', 'POST', data)
+    return jsonify(result if result and 'error' not in result else {"success": False, "error": result.get('error', 'Unknown error')})
 
-# 🚧 HexStrike 비활성화 (향후 사용 대비)
-@app.route('/comparison')
+@app.route('/api/reports/download/<filename>')
 @login_required
-def comparison():
-    # Red vs Blue 비교 분석 (비활성화)
-    flash('HexStrike AI 기능은 현재 준비 중입니다. Ollama 모델 선택 후 활성화 예정입니다.', 'info')
-    return render_template(
-        'comparison.html',
-        analysis={
-            'hexstrike_count': 0,
-            'suricata_count': 0,
-            'detection_rate': 0,
-            'matched_attacks': [],
-            'undetected_attacks': [],
-            'false_positives': []
-        },
-        time_window=60,
-        disabled=True
-    )
+def download_report(filename):
+    """보고서 다운로드"""
+    # TODO: API 백엔드에 /api/reports/download/{filename} 엔드포인트가 필요함
+    # 여기서는 Flask 서버에 저장된 파일을 제공하는 것으로 시뮬레이션
+    if not os.path.exists(app.config['REPORT_DIR']):
+        os.makedirs(app.config['REPORT_DIR'])
+    
+    # (시뮬레이션을 위해 임시 파일 생성)
+    if not os.path.exists(os.path.join(app.config['REPORT_DIR'], filename)):
+        with open(os.path.join(app.config['REPORT_DIR'], filename), 'w') as f:
+            f.write("This is a test report")
+            
+    return send_from_directory(app.config['REPORT_DIR'], filename, as_attachment=True)
 
-# 'settings' AND 'setup_mfa' ROUTES
-@app.route('/settings')
+@app.route('/api/reports/delete/<filename>', methods=['DELETE'])
 @login_required
-def settings():
-    # 사용자 설정 페이지
-    return render_template('settings.html')
-
-@app.route('/setup-mfa')
-@login_required
-def setup_mfa():
-    # MFA 설정 페이지 (QR 생성; 현재는 비활성화)
-    if not app.config.get('MFA_ENABLED'):
-        flash('MFA 기능이 비활성화되어 있습니다.', 'info')
-        return redirect(url_for('settings'))
+def delete_report(filename):
+    """보고서 삭제"""
+    # TODO: API 백엔드에 /api/reports/delete/{filename} 엔드포인트가 필요함
+    # result = api_request(f'/api/reports/delete/{filename}', 'DELETE')
     
-    if current_user.has_mfa():
-        flash('이미 MFA가 활성화되어 있습니다.', 'info')
-        return redirect(url_for('settings'))
-
-    # 새 시크릿 키 생성
-    secret = "DISABLED" # pyotp.random_base32()
+    # 임시 응답 (성공한 척)
+    print(f"Simulating delete report: {filename}")
     
-    # 임시로 세션에 저장 (인증 완료 전까지)
-    session['mfa_temp_secret'] = secret
-
-    # 인증 앱에서 사용할 URI 생성
-    # provisioning_uri = pyotp.totp.TOTP(secret).provisioning_uri(
-    #     name=current_user.id,
-    #     issuer_name="Security Dashboard"
-    # )
-
-    # # QR 코드 생성
-    # qr = qrcode.QRCode(version=1, box_size=10, border=4)
-    # qr.add_data(provisioning_uri)
-    # qr.make(fit=True)
-    # img = qr.make_image(fill_color="black", back_color="white")
-    
-    # # QR 코드를 base64 문자열로 변환
-    # buffered = io.BytesIO()
-    # img.save(buffered, format="PNG")
-    # qr_image = base64.b64encode(buffered.getvalue()).decode("utf-8")
-    
-    # return render_template(
-    #     'setup_mfa.html',
-    #     secret=secret,
-    #     qr_image=f"data:image/png;base64,{qr_image}"
-    # )
-
-# MFA 인증 코드 검증 라우트
-@app.route('/verify-mfa', methods=['POST'])
-@login_required
-def verify_mfa():
-    # MFA 설정 시 코드 검증(현재는 비활성화)
-    if not app.config.get('MFA_ENABLED'):
-        return redirect(url_for('settings'))
-    
-    if 'mfa_temp_secret' not in session:
-        flash('MFA 설정 세션이 만료되었습니다. 다시 시도하세요.', 'error')
-        return redirect(url_for('setup_mfa'))
+    # (시뮬레이션: 로컬 파일 삭제)
+    file_path = os.path.join(app.config['REPORT_DIR'], filename)
+    if os.path.exists(file_path):
+        os.remove(file_path)
         
-    secret = session['mfa_temp_secret']
-    code = request.form.get('code')
-    
-    # totp = pyotp.TOTP(secret)
-    
-    # if totp.verify(code):
-    if False:   # 임시로 False 처리
-        # 인증 성공
-        # (실제로는 DB에 저장)
-        USERS[current_user.id]['mfa_secret'] = secret
-        USERS[current_user.id]['mfa_enabled'] = True
-        
-        # 임시 시크릿 제거
-        session.pop('mfa_temp_secret', None)
-        
-        flash('MFA가 성공적으로 활성화되었습니다!', 'success')
-        return redirect(url_for('settings'))
-    else:
-        # 인증 실패
-        flash('MFA 코드가 잘못되었습니다. 다시 시도하세요.', 'error')
-        return redirect(url_for('setup_mfa'))
+    result = {"success": True, "message": f"Report {filename} deleted"}
+    return jsonify(result)
 
-# API 엔드포인트 (AJAX용)
-@app.route('/api/realtime/stats')
+@app.route('/api/get-comparison')
 @login_required
-def realtime_stats():
-    # 실시간 통계
-    stats = api_request('/api/stats/overview')
-    return jsonify(stats if stats else {})
+def get_comparison():
+    """Red vs Blue 비교 분석 (비활성화)"""
+    return jsonify({
+        'disabled': True,
+        'message': 'HexStrike AI 기능은 현재 준비 중입니다. Ollama 모델 선택 후 활성화 예정입니다.',
+        'defense_events': [],
+        'attack_events': [],
+        'analysis': { 'attempted': [], 'blocked': [] }
+    })
 
 @app.route('/api/block-ip', methods=['POST'])
 @login_required
 def block_ip_route():
-    # IP 차단
+    """IP 차단"""
     data = request.get_json()
-    ip = data.get('ip')
-    reason = data.get('reason', 'Blocked from dashboard')
-    
-    result = api_request('/api/action/block-ip', 'POST', {
-        'ip': ip,
-        'reason': reason
-    })
-    
+    result = api_request('/api/action/block-ip', 'POST', data)
     return jsonify(result if result else {'success': False, 'error': 'API 요청 실패'})
 
-# 에러 핸들러
+# --- 에러 핸들러 ---
 @app.errorhandler(404)
-def not_found(e):
-    return "<h1>404 - Page Not Found</h1>", 404
+def page_not_found(e):
+    # API 요청인 경우 JSON 반환
+    if request.path.startswith('/api/'):
+        return jsonify(error="Not Found"), 404
+    # 일반 페이지 요청인 경우 404.html 렌더링
+    return render_template('404.html'), 404
 
 @app.errorhandler(500)
-def server_error(e):
-    return "<h1>500 - Internal Server Error</h1>", 500
-
-# Jinja2 필터
-@app.template_filter('datetime')
-def format_datetime(dt_str):
-    try:
-        dt = datetime.fromisoformat(str(dt_str).replace('Z', '+00:00'))
-        return dt.strftime('%Y-%m-%d %H:%M:%S')
-    except:
-        return str(dt_str)
-
-@app.template_filter('severity_color')
-def severity_color(severity):
-    colors = {
-        1: 'danger', 2: 'warning', 3: 'info',
-        'critical': 'danger', 'high': 'warning',
-        'medium': 'info', 'low': 'secondary'
-    }
-    return colors.get(severity, 'secondary')
+def internal_server_error(e):
+    # API 요청인 경우 JSON 반환
+    if request.path.startswith('/api/'):
+        return jsonify(error="Internal Server Error"), 500
+    # 일반 페이지 요청인 경우 500.html 렌더링
+    return render_template('500.html'), 500
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=8080, debug=True)

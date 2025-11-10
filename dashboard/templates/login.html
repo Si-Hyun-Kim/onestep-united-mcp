@@ -1,43 +1,51 @@
-<!-- dashboard/templates/login.html -->
-{% extends "base.html" %}
-
-{% block content %}
-<div class="container">
-    <div class="row justify-content-center align-items-center" style="min-height: 80vh;">
-        <div class="col-md-4">
-            <div class="card shadow">
-                <div class="card-body p-5">
-                    <div class="text-center mb-4">
-                        <i class="bi bi-shield-lock" style="font-size: 3rem; color: #0d6efd;"></i>
-                        <h3 class="mt-3">Security Dashboard</h3>
-                        <p class="text-muted">로그인하여 시스템에 접근하세요</p>
-                    </div>
-                    
-                    <form method="POST" action="{{ url_for('login') }}">
-                        <div class="mb-3">
-                            <label for="username" class="form-label">사용자 이름</label>
-                            <input type="text" class="form-control" id="username" name="username" required autofocus>
-                        </div>
-                        
-                        <div class="mb-3">
-                            <label for="password" class="form-label">비밀번호</label>
-                            <input type="password" class="form-control" id="password" name="password" required>
-                        </div>
-                        
-                        <div class="mb-3 form-check">
-                            <input type="checkbox" class="form-check-input" id="remember">
-                            <label class="form-check-label" for="remember">로그인 상태 유지</label>
-                        </div>
-                        
-                        <button type="submit" class="btn btn-primary w-100">로그인</button>
-                    </form>
-                    
-                    <div class="text-center mt-3">
-                        <small class="text-muted">MFA가 활성화되어 있습니다</small>
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login - Security Operations Center</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/styles.css') }}">
+</head>
+<body>
+    <div class="login-container" id="loginContainer">
+        <div class="login-bg"></div>
+        <div class="login-box">
+            <div class="login-logo">
+                <div class="shield">🛡️</div>
+                <h1 class="login-title">Security Operations Center</h1>
+                <p class="login-subtitle">Advanced Threat Monitoring System</p>
+            </div>
+            <form class="login-form" id="loginForm">
+                <div class="form-group">
+                    <label class="form-label">Username</label>
+                    <input type="text" class="form-input" id="username" placeholder="Input ID" required>
+                </div>
+                <div class="form-group">
+                    <label class="form-label">Password</label>
+                    <input type="password" class="form-input" id="password" placeholder="••••••••" required>
+                </div>
+                
+                <div class="mfa-container" id="mfaContainer">
+                    <div class="mfa-title">Enter verification code</div>
+                    <div class="mfa-code-inputs">
+                        <input type="text" class="mfa-input" maxlength="1" data-index="0">
+                        <input type="text" class="mfa-input" maxlength="1" data-index="1">
+                        <input type="text" class="mfa-input" maxlength="1" data-index="2">
+                        <input type="text" class="mfa-input" maxlength="1" data-index="3">
+                        <input type="text" class="mfa-input" maxlength="1" data-index="4">
+                        <input type="text" class="mfa-input" maxlength="1" data-index="5">
                     </div>
                 </div>
-            </div>
+                <button type="submit" class="btn-login" id="btnLogin">Sign In</button>
+            </form>
         </div>
     </div>
-</div>
-{% endblock %}
+
+    <div class="toast" id="toast">
+        <div class="toast-icon">!</div>
+        <div class="toast-message" id="toastMessage">Notification</div>
+    </div>
+    
+    <script type="text/javascript" src="{{ url_for('static', filename='js/script.js') }}"></script>
+</body>
+</html>
