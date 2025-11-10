@@ -1,6 +1,9 @@
 // Global variables
-let charts = {}; // 차트 객체 저장
-// (Bootstrap 모달 인스턴스 저장)
+let charts = {
+    attack: null,
+    severityPie: null // 원형 차트 객체 추가
+};
+// Bootstrap 모달 인스턴스 저장
 let ruleModal, logModal;
 
 // Initialize
@@ -58,7 +61,7 @@ function setupEventListeners() {
         btn.addEventListener('click', function() {
             document.querySelectorAll('.chart-option').forEach(b => b.classList.remove('active'));
             this.classList.add('active');
-            updateChart(this.dataset.range);
+            updateChart(this.dataset.range); // 라인 차트만 업데이트
         });
     });
 
@@ -72,6 +75,16 @@ function setupEventListeners() {
         logo.addEventListener('click', () => {
             logo.classList.add('clicked');
             setTimeout(() => logo.classList.remove('clicked'), 600);
+            // 로고 클릭 시 Overview로 이동
+            switchPage('overview');
+        });
+    }
+
+    // 신규: 모바일 네비게이션 버튼
+    const btnMobileNav = document.getElementById('btnMobileNav');
+    if (btnMobileNav) {
+        btnMobileNav.addEventListener('click', () => {
+            document.getElementById('main-nav').classList.toggle('active');
         });
     }
 }
@@ -91,7 +104,7 @@ async function apiFetch(url, options = {}) {
         return await response.json();
     } catch (error) {
         console.error('API Fetch Error:', error);
-        showToast(error.message, 'error');
+        showToast(error.message || 'Network error', 'error');
         return null;
     }
 }
@@ -99,7 +112,6 @@ async function apiFetch(url, options = {}) {
 // --- 인증 ---
 async function handleLogin(e) {
     e.preventDefault();
-    // ... (이전과 동일) ...
     const username = document.getElementById('username').value;
     const password = document.getElementById('password').value;
     const btn = document.getElementById('btnLogin');
@@ -122,22 +134,22 @@ async function handleLogin(e) {
                 btn.disabled = false;
             } else {
                 showToast('Login successful!', 'success');
-                window.location.href = '/dashboard';
+                window.location.href = '/dashboard'; // 대시보드로 리디렉션
             }
         }
     } else {
+        // apiFetch가 null을 반환 (오류 토스트는 apiFetch가 이미 띄움)
         btn.disabled = false;
         btn.textContent = 'Sign In';
     }
 }
 
-// MFA verification (AJAX)
 async function verifyMFA() {
     const code = Array.from(document.querySelectorAll('.mfa-input'))
         .map(input => input.value)
         .join('');
     
-    if (code.length !== 6) return; // 6자리 모두 입력되었을 때만 실행
+    if (code.length !== 6) return;
 
     const data = await apiFetch('/verify-mfa-ajax', {
         method: 'POST',
@@ -147,28 +159,41 @@ async function verifyMFA() {
 
     if (data && data.success) {
         showToast('Verification successful!', 'success');
-        window.location.href = '/dashboard'; // 대시보드로 리디렉션
+        window.location.href = '/dashboard';
     } else {
-        // 인증 실패 (apiFetch가 오류 처리)
+        // apiFetch가 오류 토스트 띄움
         document.querySelectorAll('.mfa-input').forEach(input => input.value = '');
         document.querySelectorAll('.mfa-input')[0].focus();
     }
 }
 
-// Initialize dashboard (데이터 로드 시작)
+// --- 대시보드 초기화 ---
 function initializeDashboard() {
-    updateStats();
-    initializeCharts();
-    loadRecentAlerts(); // 최근 알림 로드
+    // 3가지 핵심 데이터 로드
+    updateStats(); // 통계 + 원형 차트 로드
+    updateChart('24h'); // 라인 차트 로드
+    loadRecentAlerts();
     
-    // Auto-update (필요 시)
-    // setInterval(updateStats, 10000); // 10초마다 통계 업데이트
+    // 페이지에 data-loaded 속성 추가 (버그 수정용)
+    document.querySelectorAll('.page').forEach(page => {
+        page.dataset.loaded = "false";
+    });
+    // Overview 페이지는 지금 로드했으므로 true
+    document.getElementById('page-overview').dataset.loaded = "true";
 }
 
-// Update dashboard stats (API 호출)
+// --- 데이터 로딩 함수 (페이지별) ---
+
 async function updateStats() {
     const data = await apiFetch('/api/get-stats');
-    if (!data) return;
+    if (!data) {
+        // API 실패 시
+        document.getElementById('totalAlerts').textContent = 'Error';
+        document.getElementById('blockedAttacks').textContent = 'Error';
+        document.getElementById('criticalThreats').textContent = 'Error';
+        document.getElementById('activeRules').textContent = 'Error';
+        return;
+    }
     
     // Overview 통계
     document.getElementById('totalAlerts').textContent = data.total_alerts_24h?.toLocaleString() || '0';
@@ -185,36 +210,93 @@ async function updateStats() {
     
     const rulesDrop = document.getElementById('rulesDrop');
     if(rulesDrop) rulesDrop.textContent = data.drop_rules_count?.toLocaleString() || '0';
+
+    // 신규: 원형 차트 그리기
+    const severityData = data.severity_distribution || {};
+    const pieCtx = document.getElementById('severityPieChart');
+    if (pieCtx) {
+        if (charts.severityPie) charts.severityPie.destroy();
+        charts.severityPie = new Chart(pieCtx.getContext('2d'), {
+            type: 'doughnut',
+            data: {
+                labels: ['Critical', 'High', 'Medium', 'Low'],
+                datasets: [{
+                    data: [
+                        severityData.critical || 0,
+                        severityData.high || 0,
+                        severityData.medium || 0,
+                        severityData.low || 0
+                    ],
+                    backgroundColor: [
+                        cssVar('--accent-red'),
+                        cssVar('--accent-yellow'),
+                        cssVar('--accent-blue'),
+                        cssVar('--text-secondary')
+                    ],
+                    borderWidth: 0
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    legend: {
+                        position: 'bottom',
+                        labels: { 
+                            color: cssVar('--text-secondary'),
+                            padding: 10
+                        }
+                    }
+                }
+            }
+        });
+    }
 }
 
-// Initialize charts (API 호출)
-async function initializeCharts() {
-    if (charts.attack) charts.attack.destroy();
+// 라인 차트 업데이트 (데이터 분리)
+async function updateChart(range) {
+    let hours = 24;
+    switch(range) {
+        case '24h': hours = 24; break;
+        case '7d': hours = 168; break;
+        case '30d': hours = 720; break;
+    }
     
-    const timelineData = await apiFetch('/api/get-timeline?hours=24');
-    const ctx1 = document.getElementById('attackChart').getContext('2d');
-    
+    const timelineData = await apiFetch(`/api/get-timeline?hours=${hours}`);
+    if (!timelineData) return; // API 실패 시 중단
+
     const labels = timelineData?.timeline?.map(d => d.time) || [];
     const counts = timelineData?.timeline?.map(d => d.count) || [];
+    
+    const ctx1 = document.getElementById('attackChart');
+    if (!ctx1) return;
 
-    charts.attack = new Chart(ctx1, {
-        type: 'line',
-        data: {
-            labels: labels,
-            datasets: [{
-                label: 'Attacks',
-                data: counts,
-                borderColor: cssVar('--accent-blue'),
-                backgroundColor: 'rgba(59, 130, 246, 0.1)',
-                tension: 0.4,
-                fill: true
-            }]
-        },
-        options: getChartOptions()
-    });
+    if (charts.attack) {
+        // 데이터만 업데이트
+        charts.attack.data.labels = labels;
+        charts.attack.data.datasets[0].data = counts;
+        charts.attack.update();
+    } else {
+        // 최초 생성
+        charts.attack = new Chart(ctx1.getContext('2d'), {
+            type: 'line',
+            data: {
+                labels: labels,
+                datasets: [{
+                    label: 'Attacks',
+                    data: counts,
+                    borderColor: cssVar('--accent-blue'),
+                    backgroundColor: 'rgba(59, 130, 246, 0.1)',
+                    tension: 0.4,
+                    fill: true
+                }]
+            },
+            options: getChartOptions() // (getChartOptions는 맨 아래 유틸리티에 있음)
+        });
+    }
 }
 
-// Load recent alerts (API 호출)
+
 async function loadRecentAlerts() {
     const tbody = document.getElementById('recentAlertsTable');
     if (!tbody) return;
@@ -224,27 +306,25 @@ async function loadRecentAlerts() {
     const alerts = data?.logs || [];
     
     if (alerts.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5">No recent alerts found.</td></tr>';
-        return;
+        tbody.innerHTML = '<tr><td colspan="5" style="text-align:center; padding: 1rem;">No recent alerts found.</td></tr>';
+    } else {
+        tbody.innerHTML = alerts.map(alert => `
+            <tr>
+                <td>${new Date(alert.timestamp).toLocaleTimeString()}</td>
+                <td>${alert.src_ip || 'N/A'}</td>
+                <td>${alert.signature || 'N/A'}</td>
+                <td><span class="severity-badge severity-${alert.severity}">${alert.severity?.toUpperCase()}</span></td>
+                <td>
+                    <button class="action-btn" onclick="showLogDetail(event, ${JSON.stringify(alert)})" title="View Detail"><i class="bi bi-eye"></i></button>
+                    <button class="action-btn" onclick="blockIP(event, '${alert.src_ip}')" title="Block IP"><i class="bi bi-shield-x"></i></button>
+                </td>
+            </tr>
+        `).join('');
     }
-    
-    tbody.innerHTML = alerts.map(alert => `
-        <tr>
-            <td>${new Date(alert.timestamp).toLocaleTimeString()}</td>
-            <td>${alert.src_ip || 'N/A'}</td>
-            <td>${alert.signature || 'N/A'}</td>
-            <td><span class="severity-badge severity-${alert.severity}">${alert.severity?.toUpperCase()}</span></td>
-            <td>
-                <button class="action-btn" onclick="showLogDetail(event, ${JSON.stringify(alert)})"><i class="bi bi-eye"></i> View</button>
-                <button class="action-btn" onclick="blockIP(event, '${alert.src_ip}')"><i class="bi bi-shield-x"></i> Block</button>
-            </td>
-        </tr>
-    `).join('');
 }
 
-// Load FULL alerts (API 호출)
 async function loadAlerts() {
-    const tbody = document.getElementById('alertsTable');
+    const tbody = document.getElementById('alertsTableBody'); // ID 수정됨
     if (!tbody) return;
     tbody.innerHTML = '<tr><td colspan="6"><div class="spinner"></div></td></tr>';
 
@@ -255,28 +335,26 @@ async function loadAlerts() {
     const alerts = data?.logs || [];
 
     if (alerts.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6">No alerts found matching criteria.</td></tr>';
-        return;
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 2rem;">No alerts found matching criteria.</td></tr>';
+    } else {
+        tbody.innerHTML = alerts.map(alert => `
+            <tr>
+                <td>${new Date(alert.timestamp).toLocaleString()}</td>
+                <td>${alert.src_ip || 'N/A'}</td>
+                <td>${alert.dest_ip || 'N/A'}</td>
+                <td>${alert.signature || 'N/A'}</td>
+                <td><span class="severity-badge severity-${alert.severity}">${alert.severity?.toUpperCase()}</span></td>
+                <td>
+                    <button class="action-btn" onclick="showLogDetail(event, ${JSON.stringify(alert)})" title="View Detail"><i class="bi bi-eye"></i></button>
+                    <button class="action-btn" onclick="blockIP(event, '${alert.src_ip}')" title="Block IP"><i class="bi bi-shield-x"></i></button>
+                </td>
+            </tr>
+        `).join('');
     }
-
-    tbody.innerHTML = alerts.map(alert => `
-        <tr>
-            <td>${new Date(alert.timestamp).toLocaleString()}</td>
-            <td>${alert.src_ip || 'N/A'}</td>
-            <td>${alert.dest_ip || 'N/A'}</td>
-            <td>${alert.signature || 'N/A'}</td>
-            <td><span class="severity-badge severity-${alert.severity}">${alert.severity?.toUpperCase()}</span></td>
-            <td>
-                <button class="action-btn" onclick="showLogDetail(event, ${JSON.stringify(alert)})"><i class="bi bi-eye"></i> View</button>
-                <button class="action-btn" onclick="blockIP(event, '${alert.src_ip}')"><i class="bi bi-shield-x"></i> Block</button>
-            </td>
-        </tr>
-    `).join('');
 }
 
-// Load IPS rules (API 호출)
 async function loadRules() {
-    const tbody = document.getElementById('rulesTable');
+    const tbody = document.getElementById('rulesTableBody'); // ID 수정됨
     if (!tbody) return;
     tbody.innerHTML = '<tr><td colspan="6"><div class="spinner"></div></td></tr>';
 
@@ -284,46 +362,44 @@ async function loadRules() {
     const data = await apiFetch(`/api/get-rules?category=${category}`);
     const rules = data?.rules || [];
     
-    // (룰 통계도 여기서 업데이트 가능)
+    // 룰 통계도 업데이트
     updateStats();
 
     if (rules.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="6">No rules found matching criteria.</td></tr>';
-        return;
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 2rem;">No rules found matching criteria.</td></tr>';
+    } else {
+        tbody.innerHTML = rules.map(rule => {
+            const isAuto = rule.file && rule.file.includes('auto_generated');
+            return `
+            <tr>
+                <td><code>${rule.sid}</code></td>
+                <td>
+                    <span class="severity-badge severity-${rule.action === 'drop' ? 'critical' : 'high'}">
+                        ${rule.action?.toUpperCase() || 'ALERT'}
+                    </span>
+                </td>
+                <td>${rule.message || rule.msg}</td>
+                <td>${rule.category || 'N/A'}</td>
+                <td>
+                    ${rule.file ? `<small>${rule.file}</small>` : ''}
+                    ${isAuto ? '<span class="severity-badge severity-low" style="margin-left: 5px;">AI</span>' : ''}
+                </td>
+                <td>
+                    <button class="action-btn" onclick='showRuleDetail(event, ${JSON.stringify(rule)})' title="View Rule Detail">
+                        <i class="bi bi-eye"></i>
+                    </button>
+                    ${isAuto ? `
+                    <button class="action-btn" onclick="deleteRule(event, ${rule.sid})" title="Delete AI Rule">
+                        <i class="bi bi-trash"></i>
+                    </button>` : ''}
+                </td>
+            </tr>
+        `}).join('');
     }
-
-    tbody.innerHTML = rules.map(rule => {
-        const isAuto = rule.file && rule.file.includes('auto_generated');
-        return `
-        <tr>
-            <td><code>${rule.sid}</code></td>
-            <td>
-                <span class="severity-badge severity-${rule.action === 'drop' ? 'critical' : 'high'}">
-                    ${rule.action?.toUpperCase()}
-                </span>
-            </td>
-            <td>${rule.message || rule.msg}</td>
-            <td>${rule.category || 'N/A'}</td>
-            <td>
-                ${rule.file ? `<small>${rule.file}</small>` : ''}
-                ${isAuto ? '<span class="severity-badge severity-low" style="margin-left: 5px;">AI</span>' : ''}
-            </td>
-            <td>
-                <button class="action-btn" onclick='showRuleDetail(event, ${JSON.stringify(rule)})'>
-                    <i class="bi bi-eye"></i>
-                </button>
-                ${isAuto ? `
-                <button class="action-btn" onclick="deleteRule(event, ${rule.sid})">
-                    <i class="bi bi-trash"></i>
-                </button>` : ''}
-            </td>
-        </tr>
-    `}).join('');
 }
 
-// Load reports (API 호출)
 async function loadReports() {
-    const tbody = document.getElementById('reportsTable');
+    const tbody = document.getElementById('reportsTableBody'); // ID 수정됨
     if (!tbody) return;
     tbody.innerHTML = '<tr><td colspan="4"><div class="spinner"></div></td></tr>';
     
@@ -332,29 +408,27 @@ async function loadReports() {
     
     if (reports.length === 0) {
         tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; padding: 2rem;">No reports generated.</td></tr>';
-        return;
+    } else {
+        tbody.innerHTML = reports.map(report => `
+            <tr>
+                <td><i class="bi bi-file-earmark-pdf" style="color:var(--accent-red); margin-right: 5px;"></i> ${report.filename}</td>
+                <td>${report.size ? (report.size / 1024).toFixed(1) + ' KB' : 'N/A'}</td>
+                <td>${new Date(report.created || report.created_at).toLocaleString()}</td>
+                <td>
+                    <a href="/api/reports/download/${report.filename}" class="action-btn" download>
+                        <i class="bi bi-download"></i> Download
+                    </a>
+                    <button class="action-btn" onclick="deleteReport(event, '${report.filename}')">
+                        <i class="bi bi-trash"></i> Delete
+                    </button>
+                </td>
+            </tr>
+        `).join('');
     }
-    
-    tbody.innerHTML = reports.map(report => `
-        <tr>
-            <td><i class="bi bi-file-earmark-pdf" style="color:var(--accent-red);"></i> ${report.filename}</td>
-            <td>${report.size ? (report.size / 1024).toFixed(1) + ' KB' : 'N/A'}</td>
-            <td>${new Date(report.created || report.created_at).toLocaleString()}</td>
-            <td>
-                <a href="/api/reports/download/${report.filename}" class="action-btn" download>
-                    <i class="bi bi-download"></i> Download
-                </a>
-                <button class="action-btn" onclick="deleteReport(event, '${report.filename}')">
-                    <i class="bi bi-trash"></i> Delete
-                </button>
-            </td>
-        </tr>
-    `).join('');
 }
 
-// Load comparison timeline (API 호출)
 async function loadComparison() {
-    const container = document.getElementById('comparison-content');
+    const container = document.getElementById('comparisonContainer'); // ID 수정됨
     if (!container) return;
     container.innerHTML = '<div class="spinner"></div>';
     
@@ -363,52 +437,72 @@ async function loadComparison() {
 
     if (data.disabled) {
         container.innerHTML = `
-            <div class="comparison-container">
-                <div class="comparison-side" style="text-align: center;">
-                    <i class="bi bi-exclamation-triangle" style="font-size: 3rem; color: var(--accent-yellow);"></i>
-                    <h2 class="comparison-title">${data.message || 'Comparison is disabled.'}</h2>
-                </div>
+            <div class="comparison-container" style="padding: 2rem; text-align: center; display: block;">
+                <i class="bi bi-exclamation-triangle" style="font-size: 3rem; color: var(--accent-yellow);"></i>
+                <h2 class="comparison-title" style="justify-content: center; margin-top: 1rem;">${data.message || 'Comparison is disabled.'}</h2>
             </div>`;
-        return;
+    } else {
+        // (정상 로드 로직)
+        container.innerHTML = `
+        <div class="comparison-container">
+            <div class="comparison-side">
+                <h2 class="comparison-title">
+                    <span class="side-indicator side-defense"></span>
+                    Defense (Suricata IPS)
+                </h2>
+                <div class="timeline" id="defenseTimeline">
+                    ${data.defense_events.map(event => `
+                        <div class="timeline-event">
+                            <div class="timeline-time">${new Date(event.time).toLocaleTimeString()}</div>
+                            <div class="timeline-content">${event.event}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+            <div class="comparison-side">
+                <h2 class="comparison-title">
+                    <span class="side-indicator side-attack"></span>
+                    Attack (HexStrike AI)
+                </h2>
+                <div class="timeline" id="attackTimeline">
+                    ${data.attack_events.map(event => `
+                        <div class="timeline-event" style="border-left-color: var(--accent-red);">
+                            <div class="timeline-time">${new Date(event.time).toLocaleTimeString()}</div>
+                            <div class="timeline-content">${event.event}</div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        </div>
+        <div class="chart-container">
+            <div class="chart-header">
+                <h2 class="chart-title">Attack Success Rate Analysis</h2>
+            </div>
+            <canvas id="comparisonChart"></canvas>
+        </div>
+        `;
+        // (차트 그리기)
+        const ctx2 = document.getElementById('comparisonChart');
+        if (ctx2) {
+            if(charts.comparison) charts.comparison.destroy();
+            charts.comparison = new Chart(ctx2.getContext('2d'), {
+                 type: 'bar',
+                 data: {
+                     labels: data.analysis.labels || [],
+                     datasets: [{
+                         label: 'Attempted',
+                         data: data.analysis.attempted || [],
+                         backgroundColor: cssVar('--accent-red')
+                     }, {
+                         label: 'Blocked',
+                         data: data.analysis.blocked || [],
+                         backgroundColor: cssVar('--accent-green')
+                     }]
+                 },
+                 options: getChartOptions()
+             });
+        }
     }
-    
-    // (데이터 구조는 app.py의 '/api/get-comparison' 응답을 따름)
-    const defenseEvents = data.defense_events || [];
-    const attackEvents = data.attack_events || [];
-    const analysis = data.analysis || { attempted: [], blocked: [] };
-
-    defenseTimeline.innerHTML = defenseEvents.length ? defenseEvents.map(event => `
-        <div class="timeline-event">
-            <div class="timeline-time">${new Date(event.time).toLocaleTimeString()}</div>
-            <div class="timeline-content">${event.event}</div>
-        </div>
-    `).join('') : '<p>No defense events.</p>';
-    
-    attackTimeline.innerHTML = attackEvents.length ? attackEvents.map(event => `
-        <div class="timeline-event" style="border-left-color: var(--accent-red);">
-            <div class="timeline-time">${new Date(event.time).toLocaleTimeString()}</div>
-            <div class="timeline-content">${event.event}</div>
-        </div>
-    `).join('') : '<p>No attack events.</p>';
-
-    // Comparison Chart
-    if (charts.comparison) charts.comparison.destroy();
-    charts.comparison = new Chart(ctx2.getContext('2d'), {
-        type: 'bar',
-        data: {
-            labels: analysis.labels || ['SQLi', 'XSS', 'DDoS'],
-            datasets: [{
-                label: 'Attempted',
-                data: analysis.attempted || [0, 0, 0],
-                backgroundColor: cssVar('--accent-red')
-            }, {
-                label: 'Blocked',
-                data: analysis.blocked || [0, 0, 0],
-                backgroundColor: cssVar('--accent-green')
-            }]
-        },
-        options: getChartOptions()
-    });
 }
 
 function loadGenerateReportPage() {
@@ -417,7 +511,6 @@ function loadGenerateReportPage() {
         const now = new Date();
         const yesterday = new Date(now.getTime() - 24 * 60 * 60 * 1000);
         
-        // YYYY-MM-DDTHH:MM
         document.getElementById('reportEnd').value = formatDateTimeLocal(now);
         document.getElementById('reportStart').value = formatDateTimeLocal(yesterday);
     } catch(e) {
@@ -425,9 +518,9 @@ function loadGenerateReportPage() {
     }
 }
 
-// --- Helper functions ---
 
-// 페이지 전환
+// --- 상호작용 함수 ---
+
 function switchPage(page) {
     const activePage = document.querySelector('.page.active');
     if (activePage && activePage.id === `page-${page}`) return;
@@ -440,38 +533,31 @@ function switchPage(page) {
         p.classList.toggle('active', p.id === `page-${page}`);
     });
     
-    // 페이지별 1회성 로드
-    if (page === 'alerts' && !document.getElementById('alertsTable').hasChildNodes()) {
-        loadAlerts();
-    } else if (page === 'rules' && !document.getElementById('rulesTable').hasChildNodes()) {
-        loadRules();
-    } else if (page === 'reports' && !document.getElementById('reportsTable').hasChildNodes()) {
-        loadReports();
-    } else if (page === 'comparison' && !document.getElementById('comparison-content').hasChildNodes()) {
-        loadComparison();
-    } else if (page === 'generate_report') {
-        loadGenerateReportPage(); // 날짜/시간 설정을 위해 매번 호출
+    // 모바일 탭 클릭 시 메뉴 닫기
+    document.getElementById('main-nav').classList.remove('active');
+
+    // *** 버그 수정: data-loaded 속성으로 1회성 로드 검사 ***
+    const pageElement = document.getElementById(`page-${page}`);
+    if (pageElement.dataset.loaded === "false") {
+        if (page === 'alerts') {
+            loadAlerts();
+        } else if (page === 'rules') {
+            loadRules();
+        } else if (page === 'reports') {
+            loadReports();
+        } else if (page === 'comparison') {
+            loadComparison();
+        } else if (page === 'generate_report') {
+            loadGenerateReportPage();
+        }
+        
+        // (주의) generate_report는 매번 날짜가 초기화되어야 하므로 플래그를 설정하지 않음
+        if (page !== 'generate_report') {
+            pageElement.dataset.loaded = "true";
+        }
     }
 }
 
-// 차트 업데이트 (시간 범위 변경)
-async function updateChart(range) {
-    let hours = 24;
-    switch(range) {
-        case '24h': hours = 24; break;
-        case '7d': hours = 168; break;
-        case '30d': hours = 720; break;
-    }
-    
-    const timelineData = await apiFetch(`/api/get-timeline?hours=${hours}`);
-    if (charts.attack && timelineData?.timeline) {
-        charts.attack.data.labels = timelineData.timeline.map(d => d.time);
-        charts.attack.data.datasets[0].data = timelineData.timeline.map(d => d.count);
-        charts.attack.update();
-    }
-}
-
-// IP 차단 (API 호출)
 async function blockIP(event, ip) {
     event.stopPropagation(); // (이벤트 버블링 방지)
     if (!ip || ip === 'N/A') {
@@ -488,13 +574,18 @@ async function blockIP(event, ip) {
         if (data && data.success) {
             showToast(`IP ${ip} blocked successfully`, 'success');
             // 테이블 새로고침
-            if (document.getElementById('page-alerts').classList.contains('active')) loadAlerts();
-            if (document.getElementById('page-overview').classList.contains('active')) loadRecentAlerts();
+            if (document.getElementById('page-alerts').classList.contains('active')) {
+                loadAlerts();
+            } else {
+                // 다른 페이지에 있더라도 alerts 페이지의 로드 플래그를 리셋
+                document.getElementById('page-alerts').dataset.loaded = "false";
+            }
+            // 최근 알림은 항상 새로고침
+            loadRecentAlerts();
         }
     }
 }
 
-// 룰 삭제
 async function deleteRule(event, sid) {
     event.stopPropagation();
     if (confirm(`Are you sure you want to delete AI rule SID ${sid}?`)) {
@@ -506,23 +597,7 @@ async function deleteRule(event, sid) {
     }
 }
 
-// 룰 토글 (API 호출)
-async function toggleRule(ruleId) {
-    const data = await apiFetch('/api/toggle-rule', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rule_id: ruleId })
-    });
-
-    if (data && data.success) {
-        showToast(`Rule ${ruleId} toggled (simulated)`, 'success');
-        loadRules(); // 룰 목록 새로고침
-    }
-}
-
-// 보고서 생성 (API 호출)
 async function generateReport() {
-    // ... (이전과 동일) ...
     const type = document.getElementById('reportType').value;
     const startDate = document.getElementById('reportStart').value;
     const endDate = document.getElementById('reportEnd').value;
@@ -549,11 +624,11 @@ async function generateReport() {
     if (data && data.success) {
         showToast('Report generated successfully', 'success');
         switchPage('reports'); // 리포트 목록 페이지로 이동
-        loadReports(); // 리포트 목록 새로고침
+        document.getElementById('page-reports').dataset.loaded = "false"; // 보고서 목록 새로고침 강제
+        loadReports();
     }
 }
 
-// 보고서 삭제
 async function deleteReport(event, filename) {
     event.stopPropagation();
     if (confirm(`Are you sure you want to delete report: ${filename}?`)) {
@@ -565,14 +640,23 @@ async function deleteReport(event, filename) {
     }
 }
 
-function downloadReport(filename) {
-    // TODO: Flask에 /api/reports/download/<filename> 같은 엔드포인트 필요
-    showToast(`Downloading ${filename}... (Not Implemented)`, 'success');
-    // window.open(`/api/reports/download/${filename}`);
+// --- 모달 표시 ---
+function showLogDetail(event, logData) {
+    event.stopPropagation();
+    const content = document.getElementById('logDetailContent');
+    if(content) {
+        content.innerHTML = `<pre>${JSON.stringify(logData, null, 2)}</pre>`;
+    }
+    if(logModal) logModal.show();
 }
 
-function addNewRule() {
-    showToast('Rule editor (Not Implemented)', 'success');
+function showRuleDetail(event, ruleData) {
+    event.stopPropagation();
+    const content = document.getElementById('ruleDetailContent');
+    if(content) {
+        content.innerHTML = `<pre>${ruleData.rule || JSON.stringify(ruleData, null, 2)}</pre>`;
+    }
+    if(ruleModal) ruleModal.show();
 }
 
 // --- 유틸리티 ---
@@ -585,7 +669,6 @@ function formatDateTimeLocal(date) {
     return `${year}-${month}-${day}T${hours}:${minutes}`;
 }
 
-// Toast 알림
 function showToast(message, type = 'success') {
     const toast = document.getElementById('toast');
     const toastMessage = document.getElementById('toastMessage');
@@ -598,9 +681,6 @@ function showToast(message, type = 'success') {
     }, 3000);
 }
 
-// (로그아웃은 단순 링크로 변경됨)
-
-// === 테마 유틸 ===
 function getTheme() {
   const saved = localStorage.getItem('theme');
   if (saved === 'light' || saved === 'dark') return saved;
@@ -625,35 +705,49 @@ function cssVar(name) {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
 
-// 차트 옵션 (테마 적용)
 function getChartOptions() {
     const text = cssVar('--text-secondary') || '#94a3b8';
-  const grid = cssVar('--border') || '#2a3142';
-  
-  return {
-      responsive: true,
-      maintainAspectRatio: false,
-      plugins: {
-          legend: { labels: { color: text } }
-      },
-      scales: {
-          x: { grid: { color: grid }, ticks: { color: text } },
-          y: { grid: { color: grid }, ticks: { color: text } }
-      }
-  };
+    const grid = cssVar('--border') || '#2a3142';
+    
+    return {
+        responsive: true,
+        maintainAspectRatio: false,
+        plugins: {
+            legend: { 
+                display: false, // 라인 차트 범례 숨김
+                labels: { color: text } 
+            }
+        },
+        scales: {
+            x: { 
+                grid: { color: grid }, 
+                ticks: { color: text } 
+            },
+            y: { 
+                grid: { color: grid }, 
+                ticks: { color: text } 
+            }
+        }
+    };
 }
 
-// 차트 테마 갱신
 function refreshChartTheme() {
-  const options = getChartOptions();
-  for (const chartName in charts) {
-      if(charts[chartName]) {
-          charts[chartName].options.plugins.legend.labels.color = options.plugins.legend.labels.color;
-          charts[chartName].options.scales.x.ticks.color = options.scales.x.ticks.color;
-          charts[chartName].options.scales.y.ticks.color = options.scales.y.ticks.color;
-          charts[chartName].options.scales.x.grid.color = options.scales.x.grid.color;
-          charts[chartName].options.scales.y.grid.color = options.scales.y.grid.color;
-          charts[chartName].update('none');
-      }
-  }
+    const options = getChartOptions();
+    
+    for (const chartName in charts) {
+        if(charts[chartName]) {
+            const chart = charts[chartName];
+            // 차트 타입에 따라 옵션 적용
+            if (chart.config.type === 'doughnut') {
+                chart.options.plugins.legend.labels.color = cssVar('--text-secondary');
+            } else if (chart.config.type === 'line' || chart.config.type === 'bar') {
+                chart.options.plugins.legend.labels.color = options.plugins.legend.labels.color;
+                chart.options.scales.x.ticks.color = options.scales.x.ticks.color;
+                chart.options.scales.y.ticks.color = options.scales.y.ticks.color;
+                chart.options.scales.x.grid.color = options.scales.x.grid.color;
+                chart.options.scales.y.grid.color = options.scales.y.grid.color;
+            }
+            chart.update('none');
+        }
+    }
 }

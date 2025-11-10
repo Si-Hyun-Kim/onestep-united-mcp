@@ -822,11 +822,53 @@ tr:hover {
   transition: transform 0.5s ease, filter 0.5s ease;
 }
 
-/* 클릭 시 회전 + 반짝 효과 */
+/* 클릭 시 반짝 효과 */
 .logo.clicked .logo-icon {
-  transform: rotate(360deg);
   filter: drop-shadow(0 0 8px var(--accent-blue));
 }
+
+
+/* 차트 그리드 (Overview) */
+.chart-grid-container {
+    display: grid;
+    grid-template-columns: 1fr 1fr; /* 2열 */
+    gap: 1.5rem;
+    margin-bottom: 2rem;
+}
+
+/* 70% 너비 (라인 차트) */
+.chart-container-large {
+    grid-column: span 2; /* 기본 2열, 나중에 JS로 조정 */
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    height: 400px;
+}
+
+/* 30% 너비 (파이 차트) */
+.chart-container-small {
+    grid-column: span 1; /* 기본 1열 */
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 1.5rem;
+    height: 400px;
+}
+
+/* 더 큰 화면에서는 라인/파이 분할 */
+@media (min-width: 1200px) {
+    .chart-grid-container {
+        grid-template-columns: 7fr 3fr; /* 7:3 비율 */
+    }
+    .chart-container-large {
+        grid-column: span 1;
+    }
+    .chart-container-small {
+        grid-column: span 1;
+    }
+}
+
 
 
 /* Responsive Design */
@@ -845,5 +887,108 @@ tr:hover {
 
     .table-filters {
         flex-direction: column;
+    }
+}
+
+/* 반응형 UI (모바일) */
+/* 모바일 네비게이션 버튼 */
+.btn-mobile-nav {
+    display: none; /* 평소엔 숨김 */
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.5rem 0.75rem;
+    font-size: 20px;
+    cursor: pointer;
+}
+
+.user-welcome {
+    color: var(--text-secondary);
+    margin-right: 1rem;
+}
+
+/* 1024px 이하 (태블릿 등) */
+@media (max-width: 1024px) {
+    .header {
+        padding: 1rem;
+    }
+    
+    .nav-tabs {
+        display: none; /* 탭 메뉴 숨김 */
+        position: absolute;
+        top: 70px; /* 헤더 높이 */
+        left: 0;
+        right: 0;
+        background: var(--bg-secondary);
+        flex-direction: column;
+        padding: 1rem;
+        border-bottom: 1px solid var(--border);
+        z-index: 100;
+    }
+    
+    /* JS로 .active가 토글되면 보임 */
+    .nav-tabs.active {
+        display: flex;
+    }
+    
+    .nav-tab {
+        width: 100%;
+        text-align: left;
+        padding: 1rem;
+    }
+
+    .btn-mobile-nav {
+        display: block; /* 모바일 버튼 보임 */
+    }
+
+    .user-welcome {
+        display: none; /* 유저 이름 숨김 */
+    }
+
+    .stats-grid {
+        grid-template-columns: 1fr 1fr; /* 2열 */
+    }
+    
+    .chart-grid-container {
+        grid-template-columns: 1fr; /* 1열 (쌓임) */
+    }
+    .chart-container-large, .chart-container-small {
+        grid-column: span 1;
+    }
+}
+
+/* 768px 이하 (모바일) */
+@media (max-width: 768px) {
+    .header-left {
+        gap: 1rem;
+    }
+    .header-right {
+        gap: 0.5rem;
+    }
+    
+    .main-content {
+        padding: 1rem;
+    }
+
+    .stats-grid {
+        grid-template-columns: 1fr; /* 1열 (완전 쌓임) */
+    }
+
+    .table-filters {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+    
+    .filter-input {
+        width: 100%;
+    }
+    
+    /* 테이블 가로 스크롤 */
+    .table-container {
+        padding: 0.5rem;
+    }
+    table {
+        min-width: 600px; /* 강제로 최소 너비 지정 */
     }
 }

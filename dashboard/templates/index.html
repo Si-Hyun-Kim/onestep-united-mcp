@@ -13,9 +13,9 @@
             <div class="header-left">
                 <div class="logo" onclick="switchPage('overview')" style="cursor:pointer;">
                     <div class="logo-icon">🛡️</div>
-                    <span>SOC Dashboard</span>
+                    <span>One Step Dashboard</span>
                 </div>
-                <nav class="nav-tabs">
+                <nav class="nav-tabs" id="main-nav">
                     <button class="nav-tab active" data-page="overview">Overview</button>
                     <button class="nav-tab" data-page="alerts">Alerts (Logs)</button>
                     <button class="nav-tab" data-page="rules">IPS Rules</button>
@@ -31,10 +31,14 @@
                 </div>
                 <button class="btn-theme" id="themeToggle" aria-label="Toggle theme" title="Toggle light/dark">🌙</button>
 
-                <span style="color: var(--text-secondary); margin-right: 1rem;">
+                <span class="user-welcome">
                     Welcome, <strong>{{ current_user.id }}</strong>
                 </span>
                 <button class="btn-logout" onclick="location.href='{{ url_for('logout') }}'">Logout</button>
+                
+                <button class="btn-mobile-nav" id="btnMobileNav">
+                    <i class="bi bi-list"></i>
+                </button>
             </div>
         </header>
 
@@ -59,16 +63,24 @@
                     </div>
                 </div>
 
-                <div class="chart-container">
-                    <div class="chart-header">
-                        <h2 class="chart-title">Attack Timeline</h2>
-                        <div class="chart-options">
-                            <button class="chart-option active" data-range="24h">24H</button>
-                            <button class="chart-option" data-range="7d">7D</button>
-                            <button class="chart-option" data-range="30d">30D</button>
+                <div class="chart-grid-container">
+                    <div class="chart-container-large">
+                        <div class="chart-header">
+                            <h2 class="chart-title">Attack Timeline</h2>
+                            <div class="chart-options">
+                                <button class="chart-option active" data-range="24h">24H</button>
+                                <button class="chart-option" data-range="7d">7D</button>
+                                <button class="chart-option" data-range="30d">30D</button>
+                            </div>
                         </div>
+                        <canvas id="attackChart"></canvas>
                     </div>
-                    <canvas id="attackChart"></canvas>
+                    <div class="chart-container-small">
+                        <div class="chart-header">
+                            <h2 class="chart-title">Severity Distribution</h2>
+                        </div>
+                        <canvas id="severityPieChart"></canvas>
+                    </div>
                 </div>
 
                 <div class="table-container">
@@ -124,7 +136,7 @@
                                 <th>Action</th>
                             </tr>
                         </thead>
-                        <tbody id="alertsTable">
+                        <tbody id="alertsTableBody">
                             <tr><td colspan="6"><div class="spinner"></div></td></tr>
                         </tbody>
                     </table>
@@ -172,7 +184,7 @@
                                 <th>Action</th>
                             </tr>
                         </thead>
-                        <tbody id="rulesTable">
+                        <tbody id="rulesTableBody">
                             <tr><td colspan="6"><div class="spinner"></div></td></tr>
                         </tbody>
                     </table>
@@ -180,9 +192,10 @@
             </div>
 
             <div class="page" id="page-reports">
-                <div class="report-generator"> <h2 class="chart-title">Generate New Report</h2>
+                <div class="report-generator">
+                    <h2 class="chart-title">Generate New Report</h2>
                     <p>Create detailed security reports for analysis and documentation.</p>
-                     <button class="btn-generate" onclick="switchPage('generate_report')">
+                    <button class="btn-generate" onclick="switchPage('generate_report')">
                         <i class="bi bi-plus-circle"></i> Create New Report
                     </button>
                 </div>
@@ -203,7 +216,7 @@
                                 <th>Action</th>
                             </tr>
                         </thead>
-                        <tbody id="reportsTable">
+                        <tbody id="reportsTableBody">
                             <tr><td colspan="4"><div class="spinner"></div></td></tr>
                         </tbody>
                     </table>
@@ -249,19 +262,14 @@
             </div>
 
             <div class="page" id="page-comparison">
-                <div id="comparison-content">
+                <div id="comparisonContainer">
                     <div class="spinner"></div>
-                </div>
-                <div class="chart-container">
-                    <div class="chart-header">
-                        <h2 class="chart-title">Attack Success Rate Analysis</h2>
-                    </div>
-                    <canvas id="comparisonChart"></canvas>
                 </div>
             </div>
 
             <div class="page" id="page-settings">
-                <div class="report-generator"> <h2 class="chart-title">Settings</h2>
+                <div class="report-generator">
+                    <h2 class="chart-title">Settings</h2>
                     <p><strong>User ID:</strong> {{ current_user.id }}</p>
                     <p><strong>Role:</strong> {{ current_user.role | capitalize }}</p>
                     
@@ -278,39 +286,9 @@
         </main>
     </div>
 
-    <div class="modal fade" id="logDetailModal">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content" style="background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border);">
-                <div class="modal-header" style="border-bottom: 1px solid var(--border);">
-                    <h5 class="modal-title">Log Detail</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="log-detail" id="logDetailContent"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <div class="modal fade" id="ruleDetailModal">
-        <div class="modal-dialog modal-lg">
-            <div class="modal-content" style="background: var(--bg-card); color: var(--text-primary); border: 1px solid var(--border);">
-                <div class="modal-header" style="border-bottom: 1px solid var(--border);">
-                    <h5 class="modal-title">Rule Detail</h5>
-                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-                </div>
-                <div class="modal-body">
-                    <div class="log-detail" id="ruleDetailContent"></div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-
-    <div class="toast" id="toast">
-        <div class="toast-icon">!</div>
-        <div class="toast-message" id="toastMessage">Notification</div>
-    </div>
+    <div class="modal fade" id="logDetailModal"> ... </div>
+    <div class="modal fade" id="ruleDetailModal"> ... </div>
+    <div class="toast" id="toast"> ... </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>

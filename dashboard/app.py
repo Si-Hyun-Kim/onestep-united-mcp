@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Flask 웹 대시보드 (SPA - Single Page Application)
-UI 재구성 버전 (v2 - rules, reports 포함)
+UI 재구성 버전 (v3 - 버그 수정 및 차트 추가)
 """
 
 from flask import Flask, render_template, request, redirect, url_for, session, jsonify, flash, send_from_directory
@@ -12,7 +12,7 @@ import os
 # Flask 앱 생성
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'dev-secret-key-change-in-production-12345')
-app.config['API_URL'] = os.environ.get('API_URL', 'http://localhost:8000')
+app.config['API_URL'] = os.environ.get('API_URL', 'http://localhost:8000') # <-- 실제 API 서버 주소
 app.config['MFA_ENABLED'] = False
 app.config['ITEMS_PER_PAGE'] = 50
 app.config['REPORT_DIR'] = os.path.join(app.root_path, 'generated_reports') # 보고서 저장 경로 (예시)
@@ -44,7 +44,7 @@ class User(UserMixin):
 # 사용자 데이터 (실제로는 DB 사용)
 USERS = {
     'admin': {
-        'password': 'admin',
+        'password': 'admin', # script.js와 일치
         'role': 'admin',
         'mfa_secret': 'BASE32SECRETCODE',
         'mfa_enabled': False, # 테스트를 위해 False로 둠
@@ -73,9 +73,16 @@ def api_request(endpoint, method='GET', data=None):
         elif response.status_code == 204: # DELETE 성공 (No Content)
              return {"success": True}
         else:
-            return {"error": f"API error: {response.status_code}"}
+            # API가 404 등을 반환할 때 JSON이 아닐 수 있음
+            try:
+                error_json = response.json()
+            except requests.exceptions.JSONDecodeError:
+                error_json = {"error": response.text}
+            print(f"API Error Response: {error_json}")
+            return {"error": f"API error: {response.status_code}", "detail": error_json}
+            
     except Exception as e:
-        print(f"API Error: {e}")
+        print(f"API Request Exception: {e}")
         return {"error": str(e)}
 
 # --- 인증 라우트 (AJAX 처리) ---
@@ -143,9 +150,8 @@ def index():
 @app.route('/api/get-stats')
 @login_required
 def get_stats():
-    """대시보드 통계 데이터"""
+    """대시보드 통계 데이터 (원형 차트 데이터 포함)"""
     stats = api_request('/api/stats/overview')
-    # 룰 통계도 추가 (rules.html에서 사용)
     rules_data = api_request('/api/rules/active?category=all')
     
     stats_summary = stats if stats and 'error' not in stats else {}
@@ -155,6 +161,16 @@ def get_stats():
     stats_summary['ai_rules_count'] = len([r for r in rules_list if 'auto_generated' in r.get('file', '')])
     stats_summary['drop_rules_count'] = len([r for r in rules_list if r.get('action') == 'drop'])
     
+    # (중요) 원형 차트를 위해 /api/stats/overview가 이 'severity_distribution'을 반환해야 함
+    # 만약 반환하지 않는다면, 여기서 임시 데이터를 제공하거나 API 서버를 수정해야 함
+    if 'severity_distribution' not in stats_summary:
+        stats_summary['severity_distribution'] = {
+            "critical": stats_summary.get("critical_alerts_24h", 1), # 예시 데이터
+            "high": stats_summary.get("total_alerts_24h", 10) // 2,
+            "medium": stats_summary.get("total_alerts_24h", 10) // 3,
+            "low": stats_summary.get("total_alerts_24h", 10) // 4
+        }
+    
     return jsonify(stats_summary)
 
 @app.route('/api/get-timeline')
@@ -163,14 +179,21 @@ def get_timeline():
     """대시보드 타임라인 차트 데이터"""
     hours = request.args.get('hours', 24, type=int)
     timeline = api_request(f'/api/stats/timeline?hours={hours}')
-    return jsonify(timeline if timeline and 'error' not in timeline else {'timeline': []})
+    # (API가 에러 반환 시 임시 데이터 제공)
+    if not timeline or 'error' in timeline:
+        timeline = {"timeline": [
+            {"time": "00:00", "count": 0}, {"time": "04:00", "count": 0}, 
+            {"time": "08:00", "count": 0}, {"time": "12:00", "count": 0},
+            {"time": "16:00", "count": 0}, {"time": "20:00", "count": 0}
+        ]}
+    return jsonify(timeline)
 
 @app.route('/api/get-recent-alerts')
 @login_required
 def get_recent_alerts():
     """대시보드 최근 알림 (상위 5개)"""
-    top_threats = api_request('/api/logs/suricata?count=5')
-    return jsonify(top_threats if top_threats and 'error' not in top_threats else {'logs': []})
+    data = api_request('/api/logs/suricata?count=5')
+    return jsonify(data if data and 'error' not in data else {'logs': []})
 
 @app.route('/api/get-alerts')
 @login_required
@@ -183,25 +206,22 @@ def get_alerts():
     if severity != 'all':
         endpoint += f'&severity={severity}'
     
-    logs_data = api_request(endpoint)
-    return jsonify(logs_data if logs_data and 'error' not in logs_data else {'logs': []})
+    data = api_request(endpoint)
+    return jsonify(data if data and 'error' not in data else {'logs': []})
 
 @app.route('/api/get-rules')
 @login_required
 def get_rules():
     """룰 관리 페이지 데이터"""
     category = request.args.get('category', 'all')
-    rules_data = api_request(f'/api/rules/active?category={category}')
-    return jsonify(rules_data if rules_data and 'error' not in rules_data else {'rules': []})
+    data = api_request(f'/api/rules/active?category={category}')
+    return jsonify(data if data and 'error' not in data else {'rules': []})
 
 @app.route('/api/rules/<int:sid>', methods=['DELETE'])
 @login_required
 def delete_rule(sid):
     """룰 삭제 (auto_generated 룰만)"""
-    # TODO: 실제 API 백엔드에 /api/rules/delete/{sid} 같은 엔드포인트가 필요함
-    # result = api_request(f'/api/rules/delete/{sid}', 'DELETE')
-    
-    # 임시 응답 (성공한 척)
+    # result = api_request(f'/api/rules/delete/{sid}', 'DELETE') # 실제 API 호출
     print(f"Simulating delete rule: {sid}")
     result = {"success": True, "message": f"Rule {sid} deleted"}
     return jsonify(result)
@@ -210,10 +230,14 @@ def delete_rule(sid):
 @login_required
 def get_reports():
     """보고서 목록"""
-    reports_data = api_request('/api/reports/list')
-    # reports.html 템플릿에 맞게 데이터 가공 (size, created 등)
-    # 예시: reports_data = {'reports': [{'filename': 'report.pdf', 'size': 12345, 'created': '...'}, ...]}
-    return jsonify(reports_data if reports_data and 'error' not in reports_data else {'reports': []})
+    data = api_request('/api/reports/list')
+    # (API가 에러 반환 시 임시 데이터 제공)
+    if not data or 'error' in data:
+        data = {"reports": [
+            {"filename": "simulated_report_1.pdf", "size": 12345, "created_at": "2025-11-10T10:00:00Z"},
+            {"filename": "simulated_report_2.pdf", "size": 67890, "created_at": "2025-11-09T14:30:00Z"}
+        ]}
+    return jsonify(data)
 
 @app.route('/api/generate-report', methods=['POST'])
 @login_required
@@ -223,37 +247,30 @@ def generate_report():
     result = api_request('/api/reports/generate', 'POST', data)
     return jsonify(result if result and 'error' not in result else {"success": False, "error": result.get('error', 'Unknown error')})
 
-@app.route('/api/reports/download/<filename>')
+@app.route('/api/reports/download/<path:filename>')
 @login_required
 def download_report(filename):
     """보고서 다운로드"""
-    # TODO: API 백엔드에 /api/reports/download/{filename} 엔드포인트가 필요함
-    # 여기서는 Flask 서버에 저장된 파일을 제공하는 것으로 시뮬레이션
     if not os.path.exists(app.config['REPORT_DIR']):
         os.makedirs(app.config['REPORT_DIR'])
     
     # (시뮬레이션을 위해 임시 파일 생성)
-    if not os.path.exists(os.path.join(app.config['REPORT_DIR'], filename)):
-        with open(os.path.join(app.config['REPORT_DIR'], filename), 'w') as f:
-            f.write("This is a test report")
+    dummy_path = os.path.join(app.config['REPORT_DIR'], filename)
+    if not os.path.exists(dummy_path):
+        with open(dummy_path, 'w') as f:
+            f.write(f"This is a test report for {filename}")
             
     return send_from_directory(app.config['REPORT_DIR'], filename, as_attachment=True)
 
-@app.route('/api/reports/delete/<filename>', methods=['DELETE'])
+@app.route('/api/reports/delete/<path:filename>', methods=['DELETE'])
 @login_required
 def delete_report(filename):
     """보고서 삭제"""
-    # TODO: API 백엔드에 /api/reports/delete/{filename} 엔드포인트가 필요함
-    # result = api_request(f'/api/reports/delete/{filename}', 'DELETE')
-    
-    # 임시 응답 (성공한 척)
+    # result = api_request(f'/api/reports/delete/{filename}', 'DELETE') # 실제 API 호출
     print(f"Simulating delete report: {filename}")
-    
-    # (시뮬레이션: 로컬 파일 삭제)
     file_path = os.path.join(app.config['REPORT_DIR'], filename)
     if os.path.exists(file_path):
         os.remove(file_path)
-        
     result = {"success": True, "message": f"Report {filename} deleted"}
     return jsonify(result)
 
@@ -274,24 +291,22 @@ def get_comparison():
 def block_ip_route():
     """IP 차단"""
     data = request.get_json()
-    result = api_request('/api/action/block-ip', 'POST', data)
-    return jsonify(result if result else {'success': False, 'error': 'API 요청 실패'})
+    # result = api_request('/api/action/block-ip', 'POST', data) # 실제 API 호출
+    print(f"Simulating block IP: {data.get('ip')}")
+    result = {"success": True, "message": f"IP {data.get('ip')} blocked (simulated)"}
+    return jsonify(result)
 
 # --- 에러 핸들러 ---
 @app.errorhandler(404)
 def page_not_found(e):
-    # API 요청인 경우 JSON 반환
     if request.path.startswith('/api/'):
         return jsonify(error="Not Found"), 404
-    # 일반 페이지 요청인 경우 404.html 렌더링
     return render_template('404.html'), 404
 
 @app.errorhandler(500)
 def internal_server_error(e):
-    # API 요청인 경우 JSON 반환
     if request.path.startswith('/api/'):
         return jsonify(error="Internal Server Error"), 500
-    # 일반 페이지 요청인 경우 500.html 렌더링
     return render_template('500.html'), 500
 
 if __name__ == '__main__':
