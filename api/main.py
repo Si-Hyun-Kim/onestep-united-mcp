@@ -6,7 +6,7 @@ FastAPI Backend - 실제 데이터 버전
 MCP 서버가 저장한 data/alerts.json, data/rules.json 읽기
 """
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, Dict
 import json
@@ -15,11 +15,22 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from collections import Counter
 
+import uvicorn  # (if __name__ == "__main__" 에서 사용할 것이므로)
+import asyncio  # 실시간 감시(tail)를 위해
+from typing import List, Set # Set을 추가
+
 app = FastAPI(
     title="Suricata Monitoring API",
     description="실시간 Suricata 로그 API",
     version="3.0.0"
 )
+
+# --- WebSocket 연결 관리 ---
+# 현재 연결된 모든 클라이언트(대시보드)를 저장할 집합(Set)
+connected_clients: Set[WebSocket] = set()
+
+# 파일의 마지막으로 읽은 위치를 저장 (서버가 켜져 있는 동안)
+last_file_position = 0
 
 app.add_middleware(
     CORSMiddleware,
@@ -315,6 +326,112 @@ async def health_check():
             "rules": str(RULES_FILE.exists())
         }
     }
+
+# --- 1. WebSocket 연결을 처리하는 엔드포인트 ---
+@app.websocket("/ws/alerts")
+async def websocket_endpoint(websocket: WebSocket):
+    """
+    대시보드(클라이언트)가 이 엔드포인트로 WebSocket 연결을 시도합니다.
+    """
+    await websocket.accept()
+    connected_clients.add(websocket) # 새 클라이언트를 집합에 추가
+    print(f"[API]  WebSocket 클라이언트 연결됨. (총 {len(connected_clients)} 명)")
+    try:
+        while True:
+            # 클라이언트로부터 메시지를 받을 수도 있지만, 지금은 받기만 대기
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        # 클라이언트 연결이 끊어지면 집합에서 제거
+        connected_clients.remove(websocket)
+        print(f"[API] WebSocket 클라이언트 연결 끊어짐. (남은 {len(connected_clients)} 명)")
+
+# --- 2. eve.json 파일을 실시간 감시(tail)하는 함수 ---
+async def tail_eve_json_file():
+    """
+    FastAPI 서버 시작 시 백그라운드에서 실행될 함수.
+    eve.json 파일의 변경 사항을 감지하여 새 알림을 WebSocket으로 PUSH합니다.
+    """
+    global last_file_position
+    print("[API] 🚀 실시간 알림 감시 시작 (tail_eve_json_file)")
+
+    # 시작 시 파일의 현재 끝 위치 저장
+    try:
+        if ALERTS_FILE.exists():
+            with open(ALERTS_FILE, "r") as f:
+                f.seek(0, 2) # 파일의 맨 끝으로 이동
+                last_file_position = f.tell() # 현재 위치(파일 크기) 저장
+    except Exception as e:
+        print(f"[API] ❌ 초기 파일 위치 읽기 실패: {e}")
+
+    while True:
+        try:
+            if ALERTS_FILE.exists():
+                with open(ALERTS_FILE, "r") as f:
+                    # 마지막으로 읽은 위치로 이동
+                    f.seek(last_file_position)
+                    new_lines = f.readlines()
+                    
+                    # 파일의 현재 끝 위치를 다음 루프를 위해 갱신
+                    last_file_position = f.tell()
+
+                for line in new_lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    
+                    try:
+                        event_data = json.loads(line)
+                        
+                        # (중요) 'alert' 타입만 필터링
+                        if event_data.get("event_type") == "alert":
+                            
+                            alert_details = event_data.get('alert')
+                            if not alert_details:
+                                continue
+
+                            # load_alerts에서 평탄화했던 데이터와 동일한 구조로 만듦
+                            alert_payload = {
+                                "timestamp": event_data.get("timestamp"),
+                                "src_ip": event_data.get("src_ip"),
+                                "dest_ip": event_data.get("dest_ip"),
+                                "src_port": event_data.get("src_port"),
+                                "dest_port": event_data.get("dest_port"),
+                                "proto": event_data.get("proto"),
+                                "signature": alert_details.get("signature"),
+                                "severity": alert_details.get("severity"),
+                                "category": alert_details.get("category"),
+                                "sid": alert_details.get("signature_id") 
+                            }
+                            
+                            # (중요) 연결된 모든 클라이언트에게 새 알림 PUSH
+                            # 여러 클라이언트가 동시에 연결되어 있을 수 있으므로 리스트 복사 후 전송
+                            clients_to_send = list(connected_clients) 
+                            for client in clients_to_send:
+                                try:
+                                    # JSON 문자열로 변환하여 전송
+                                    await client.send_text(json.dumps(alert_payload))
+                                except Exception:
+                                    # 전송 실패 시 (연결 끊김 등) 집합에서 제거
+                                    connected_clients.remove(client)
+                                    
+                    except json.JSONDecodeError:
+                        continue # 파싱 실패한 줄은 무시
+                        
+        except Exception as e:
+            print(f"[API] ❌ 파일 감시(tail) 중 에러: {e}")
+        
+        # 1초마다 파일의 변경 사항을 다시 체크
+        await asyncio.sleep(1)
+
+# --- 3. FastAPI 시작 시 tail 함수를 백그라운드 작업으로 등록 ---
+@app.on_event("startup")
+async def on_startup():
+    """
+    FastAPI 서버가 시작될 때 `tail_eve_json_file` 함수를 
+    백그라운드 태스크로 자동 실행합니다.
+    """
+    asyncio.create_task(tail_eve_json_file())
+
 
 if __name__ == "__main__":
     import uvicorn
