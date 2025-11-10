@@ -12,7 +12,7 @@ from typing import Optional, Dict
 import json
 import re
 from pathlib import Path
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from collections import Counter
 
 import uvicorn  # (if __name__ == "__main__" 에서 사용할 것이므로)
@@ -195,12 +195,20 @@ async def get_stats_overview():
             }
         }
     
-    cutoff = datetime.now() - timedelta(hours=24)
-    recent_alerts = [
-        a for a in alerts 
-        if datetime.fromisoformat(a['timestamp'].replace('Z', '+00:00')) > cutoff
-    ]
+    # (수정) 현재 시간을 UTC(시간대 정보 포함) 기준으로 변경
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=24)
+    recent_alerts = []
     
+    for a in alerts:
+        try:
+            # (수정) .replace() 제거, fromisoformat이 +0900을 알아서 처리
+            alert_time = datetime.fromisoformat(a['timestamp'])
+            if alert_time > cutoff:
+                recent_alerts.append(a)
+        except (ValueError, TypeError):
+            # 타임스탬프 형식이 잘못된 경우 무시
+            continue
+            
     by_severity = Counter(a['severity'] for a in recent_alerts)
     
     return {
@@ -213,7 +221,7 @@ async def get_stats_overview():
             "critical": by_severity.get(1, 0),
             "high": by_severity.get(2, 0),
             "medium": by_severity.get(3, 0),
-            "low": 0
+            "low": by_severity.get(4, 0) + by_severity.get(5, 0) # (예시: 4 이상은 low)
         }
     }
 
@@ -222,15 +230,23 @@ async def get_stats_timeline(hours: int = 24):
     """시간대별 타임라인"""
     alerts = load_alerts()
     
-    cutoff = datetime.now() - timedelta(hours=hours)
-    recent_alerts = [
-        a for a in alerts 
-        if datetime.fromisoformat(a['timestamp'].replace('Z', '+00:00')) > cutoff
-    ]
-    
+    # (수정) 현재 시간을 UTC(시간대 정보 포함) 기준으로 변경
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
+    recent_alerts = []
+
+    for a in alerts:
+        try:
+            # (수정) .replace() 제거
+            alert_time = datetime.fromisoformat(a['timestamp'])
+            if alert_time > cutoff:
+                recent_alerts.append(a)
+        except (ValueError, TypeError):
+            continue
+
     timeline = {}
     for alert in recent_alerts:
-        hour = datetime.fromisoformat(alert['timestamp'].replace('Z', '+00:00')).strftime('%H:00')
+        # (수정) .replace() 제거
+        hour = datetime.fromisoformat(alert['timestamp']).strftime('%H:00')
         timeline[hour] = timeline.get(hour, 0) + 1
     
     timeline_list = [{"time": k, "count": v} for k, v in sorted(timeline.items())]
