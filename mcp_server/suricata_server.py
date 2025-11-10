@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
 """
-Suricata MCP Server - Suricata 전용 모니터링
-- eve.json tail (실시간 모니터링)
-- 파일 회전 대응
-- LLM 룰 생성기와 연동 준비
+Suricata MCP Server - 데이터 공유 버전
+- eve.json 실시간 모니터링
+- 알림 데이터를 data/alerts.json에 저장 (FastAPI와 공유)
+- 생성된 룰을 data/rules.json에 저장
+- Ollama 자동 룰 생성
 """
 
 import os
@@ -12,25 +13,27 @@ import asyncio
 import json
 import io
 from pathlib import Path
-from typing import Any, Optional
+from typing import Optional
 from datetime import datetime
+import subprocess
 
-# MCP 모듈
 try:
-    from mcp.server.models import InitializationOptions
-    from mcp.server import NotificationOptions, Server
-    from mcp.server.stdio import stdio_server
-    from mcp.types import Resource, Tool, TextContent, ImageContent, EmbeddedResource
+    import httpx
 except ImportError:
-    print("ERROR: mcp 모듈이 설치되지 않았습니다.", file=sys.stderr)
-    print("설치: pip install mcp", file=sys.stderr)
+    print("ERROR: httpx 설치 필요 (pip install httpx)", file=sys.stderr)
     sys.exit(1)
 
 # ================== 전역 상태 ==================
 alert_history: list[dict] = []
-blocked_ips: set[str] = set()
+generated_rules: list[dict] = []
+processed_alerts: set[int] = set()
 
-# 설정 로드
+# 데이터 파일 경로
+DATA_DIR = Path("data")
+ALERTS_FILE = DATA_DIR / "alerts.json"
+RULES_FILE = DATA_DIR / "rules.json"
+
+# 설정
 CONFIG_PATH = Path("config.json")
 if CONFIG_PATH.exists():
     with open(CONFIG_PATH) as f:
@@ -43,7 +46,14 @@ else:
         },
         "mcp_server": {
             "backfill_lines": 50,
-            "max_alerts": 1000
+            "max_alerts": 1000,
+            "auto_generate_rules": True,
+            "severity_threshold": 2
+        },
+        "ollama": {
+            "enabled": True,
+            "base_url": "http://localhost:11434",
+            "model": "llama3.2:latest"
         }
     }
 
@@ -51,16 +61,190 @@ EVE_LOG_PATH = config["suricata"]["eve_log_path"]
 RULES_PATH = config["suricata"]["rules_path"]
 BACKFILL_LINES = config["mcp_server"]["backfill_lines"]
 MAX_ALERTS = config["mcp_server"]["max_alerts"]
+AUTO_GENERATE = config["mcp_server"].get("auto_generate_rules", True)
+SEVERITY_THRESHOLD = config["mcp_server"].get("severity_threshold", 2)
 
-# ================== 안전 로깅 ==================
+OLLAMA_ENABLED = config["ollama"]["enabled"]
+OLLAMA_BASE_URL = config["ollama"]["base_url"]
+OLLAMA_MODEL = config["ollama"]["model"]
+
+# 데이터 디렉토리 생성
+DATA_DIR.mkdir(exist_ok=True)
+
+# ================== 로깅 ==================
 def log(*args, **kwargs):
-    """stderr로만 로깅 (stdout은 MCP 통신용)"""
     print(*args, file=sys.stderr, **kwargs)
+
+# ================== 데이터 공유 함수 ==================
+def save_alerts():
+    """알림 데이터를 JSON 파일로 저장"""
+    try:
+        with open(ALERTS_FILE, "w") as f:
+            json.dump({
+                "total": len(alert_history),
+                "alerts": alert_history[-1000:]  # 최근 1000개만
+            }, f, indent=2)
+    except Exception as e:
+        log(f"[Data] ❌ 알림 저장 실패: {e}")
+
+def save_rules():
+    """생성된 룰을 JSON 파일로 저장"""
+    try:
+        with open(RULES_FILE, "w") as f:
+            json.dump({
+                "total": len(generated_rules),
+                "rules": generated_rules
+            }, f, indent=2)
+    except Exception as e:
+        log(f"[Data] ❌ 룰 저장 실패: {e}")
+
+# ================== Ollama 클라이언트 ==================
+class OllamaClient:
+    def __init__(self, base_url: str = OLLAMA_BASE_URL, model: str = OLLAMA_MODEL):
+        self.base_url = base_url.rstrip('/')
+        self.model = model
+        self.client = httpx.AsyncClient(timeout=120.0)
+    
+    async def generate_rule(self, alert_data: dict) -> Optional[str]:
+        if not OLLAMA_ENABLED:
+            return None
+        
+        prompt = self._build_prompt(alert_data)
+        
+        try:
+            log(f"[Ollama] 🤖 LLM 룰 생성: {alert_data['signature'][:50]}...")
+            
+            response = await self.client.post(
+                f"{self.base_url}/api/generate",
+                json={
+                    "model": self.model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.3,
+                        "top_p": 0.9
+                    }
+                }
+            )
+            
+            if response.status_code == 200:
+                result = response.json()
+                rule = self._extract_rule(result.get("response", ""))
+                if rule:
+                    log(f"[Ollama] ✓ 룰 생성 완료")
+                return rule
+            else:
+                log(f"[Ollama] ❌ HTTP 오류: {response.status_code}")
+                return None
+                
+        except httpx.TimeoutException:
+            log(f"[Ollama] ❌ 타임아웃")
+            return None
+        except httpx.ConnectError:
+            log(f"[Ollama] ❌ 연결 실패")
+            return None
+        except Exception as e:
+            log(f"[Ollama] ❌ 예외: {e}")
+            return None
+    
+    def _build_prompt(self, alert_data: dict) -> str:
+        return f"""You are a Suricata IDS rule generator. Create a detection rule for this alert.
+
+ALERT:
+- Source IP: {alert_data.get('src_ip')}
+- Destination IP: {alert_data.get('dest_ip')}
+- Protocol: {alert_data.get('proto')}
+- Signature: {alert_data.get('signature')}
+- Category: {alert_data.get('category')}
+- Severity: {alert_data.get('severity')}
+
+REQUIREMENTS:
+1. Output ONLY the Suricata rule (one line)
+2. Format: alert [protocol] any any -> any any (msg:"..."; content:"..."; classtype:...; sid:9XXXXXX; rev:1;)
+3. Use SID 9000000-9999999
+4. Choose appropriate classtype
+5. No explanations, only the rule
+
+Generate rule:"""
+    
+    def _extract_rule(self, response: str) -> Optional[str]:
+        lines = response.strip().split('\n')
+        
+        for line in lines:
+            line = line.strip()
+            if line.startswith('```'):
+                continue
+            if (line.startswith(('alert', 'drop', 'reject', 'pass')) and 
+                'sid:' in line and 'msg:' in line):
+                if not line.endswith(';'):
+                    line += ';'
+                return line
+        return None
+    
+    async def close(self):
+        await self.client.aclose()
+
+# ================== 룰 관리자 ==================
+class RuleManager:
+    def __init__(self, rules_path: str = RULES_PATH):
+        self.rules_path = Path(rules_path)
+        self.auto_rules_file = self.rules_path / "auto_generated.rules"
+    
+    async def add_rule(self, rule: str, alert_info: dict) -> bool:
+        try:
+            self.rules_path.mkdir(parents=True, exist_ok=True)
+            
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            
+            with open(self.auto_rules_file, "a") as f:
+                f.write(f"\n# Generated: {timestamp}\n")
+                f.write(f"# Alert: {alert_info.get('signature', 'Unknown')}\n")
+                f.write(f"# Severity: {alert_info.get('severity')}\n")
+                f.write(f"{rule}\n")
+            
+            # 생성 기록 저장
+            generated_rules.append({
+                "rule": rule,
+                "alert": alert_info.get('signature', 'Unknown'),
+                "severity": alert_info.get('severity'),
+                "timestamp": timestamp,
+                "file": "auto_generated.rules"
+            })
+            
+            # JSON 파일에 저장 (FastAPI와 공유)
+            save_rules()
+            
+            log(f"[Rules] ✓ 룰 추가: {self.auto_rules_file}")
+            
+            await self._reload_suricata()
+            
+            return True
+            
+        except PermissionError:
+            log(f"[Rules] ❌ 권한 거부")
+            return False
+        except Exception as e:
+            log(f"[Rules] ❌ 실패: {e}")
+            return False
+    
+    async def _reload_suricata(self):
+        try:
+            log("[Rules] 🔄 Suricata 재시작...")
+            result = subprocess.run(
+                ["sudo", "systemctl", "reload", "suricata"],
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode == 0:
+                log("[Rules] ✓ 재시작 완료")
+            else:
+                log(f"[Rules] ⚠ 재시작 실패: {result.stderr}")
+        except Exception as e:
+            log(f"[Rules] ❌ 예외: {e}")
 
 # ================== Suricata 모니터 ==================
 class SuricataMonitor:
-    """Suricata eve.json 실시간 tail 모니터 (fstat 기반 폴링)"""
-    
     def __init__(self, eve_log_path: str = EVE_LOG_PATH, backfill_lines: int = BACKFILL_LINES):
         self.eve_log_path = Path(eve_log_path)
         self.backfill_lines = max(0, backfill_lines)
@@ -68,76 +252,63 @@ class SuricataMonitor:
         self._inode: Optional[int] = None
         self.running = False
         self._buffer = b""
+        self.ollama = OllamaClient()
+        self.rule_manager = RuleManager()
+        self._save_counter = 0
 
     async def start(self):
-        """모니터링 시작 (fstat 기반)"""
         self.running = True
         
         while not self.eve_log_path.exists():
-            log(f"[MCP] Waiting for {self.eve_log_path}...")
+            log(f"[MCP] eve.json 대기: {self.eve_log_path}...")
             await asyncio.sleep(1)
         
         await self._open_file(initial=True)
-        log(f"[MCP] Monitoring: {self.eve_log_path}")
+        log(f"[MCP] ✓ 모니터링 시작: {self.eve_log_path}")
         
-        # 메인 루프
+        if AUTO_GENERATE and OLLAMA_ENABLED:
+            log(f"[MCP] 🤖 자동 룰 생성 활성화 (심각도 <= {SEVERITY_THRESHOLD})")
+        
         while self.running:
             try:
-                # 1. 파일이 (회전 등으로) 변경되었는지 확인 및 재오픈
-                #    문제가 생기면 FileNotFoundError를 발생시킬 수 있음
                 await self._reopen_if_rotated()
 
                 if not self._fd:
-                    # 파일이 아직 (재)생성되지 않음
                     await asyncio.sleep(0.5)
                     continue
 
-                # 2. [핵심] fstat을 사용해 파일 크기 변경 감지 (select 대체)
                 current_pos = self._fd.tell()
                 stat_result = os.fstat(self._fd.fileno())
                 
                 if stat_result.st_size > current_pos:
-                    # 3. 파일 크기 증가 = 새 데이터 있음
-                    #    (st_size - current_pos) 만큼만 정확히 읽음
                     data_chunk = self._fd.read(stat_result.st_size - current_pos)
                     if data_chunk:
                         self._buffer += data_chunk
-                        self._drain_buffer()
+                        await self._drain_buffer()
                 
                 elif stat_result.st_size < current_pos:
-                    # 4. 파일 크기 감소 = 트렁케이트 (e.g., > eve.json)
-                    log("[MCP] ⚠ Log truncated, seeking to new position...")
+                    log("[MCP] ⚠ 로그 트렁케이트")
                     self._fd.seek(stat_result.st_size)
-                    self._buffer = b"" # 버퍼 비우기
-
-                else:
-                    # 5. 파일 크기 동일 = 새 데이터 없음. (pass)
-                    pass
+                    self._buffer = b""
                 
-                # 6. 이벤트 루프에 제어권 반환 (폴링 간격)
                 await asyncio.sleep(0.1)
 
             except PermissionError:
-                log("[MCP] ❌ Permission denied reading eve.json")
+                log("[MCP] ❌ 권한 거부")
                 await asyncio.sleep(2)
             except FileNotFoundError:
-                # _reopen_if_rotated() 에서 stat() 실패 시, 또는
-                # os.fstat() 에서 _fd가 닫힌 직후일 때 발생
-                log("[MCP] ⚠ eve.json not found (rotating?). Retrying...")
+                log("[MCP] ⚠ 파일 없음")
                 if self._fd:
                     try: self._fd.close()
-                    except Exception: pass
+                    except: pass
                 self._fd = None
                 self._inode = None
                 await asyncio.sleep(1)
             except Exception as e:
-                log(f"[MCP] ❌ Error in monitor loop: {e}")
-                import traceback
-                log(traceback.format_exc())
+                log(f"[MCP] ❌ 오류: {e}")
                 await asyncio.sleep(0.5)
 
-    def _drain_buffer(self):
-        """버퍼에서 완성된 라인을 찾아 처리 (기존과 동일)"""
+    async def _drain_buffer(self):
         last_newline = self._buffer.rfind(b"\n")
         if last_newline == -1:
             return
@@ -147,15 +318,14 @@ class SuricataMonitor:
 
         for line_bytes in lines_to_process.splitlines():
             line_str = line_bytes.decode("utf-8", errors="ignore")
-            self._consume_line(line_str)
+            await self._consume_line(line_str)
             
     async def _open_file(self, initial=False):
-        """파일 열기 (바이너리 모드) (기존과 동일)"""
-        log(f"[MCP] Opening {self.eve_log_path}...")
-        self._fd = open(self.eve_log_path, "rb") # "rb" (바이너리 읽기)
+        log(f"[MCP] 파일 열기: {self.eve_log_path}...")
+        self._fd = open(self.eve_log_path, "rb")
         stat = self.eve_log_path.stat()
         self._inode = stat.st_ino
-        self._buffer = b"" # 버퍼 초기화
+        self._buffer = b""
         
         if initial and self.backfill_lines > 0:
             try:
@@ -177,48 +347,37 @@ class SuricataMonitor:
                 lines = buf.splitlines()[-self.backfill_lines:]
                 for line_bytes in lines:
                     line_str = line_bytes.decode("utf-8", errors="ignore")
-                    self._consume_line(line_str)
+                    await self._consume_line(line_str)
                 
-                log(f"[MCP] ✓ Backfilled {len(lines)} alerts")
+                log(f"[MCP] ✓ 백필: {len(lines)}개")
             except Exception as e:
-                log(f"[MCP] ⚠ Backfill failed: {e}")
+                log(f"[MCP] ⚠ 백필 실패: {e}")
             
             self._fd.seek(0, 2)
         else:
             self._fd.seek(0, 2)
     
     async def _reopen_if_rotated(self):
-        """로그 회전 감지 및 재오픈 (fstat 기반)"""
         if not self._fd:
-            # _fd가 없으면 (초기 실행, 또는 EOF/Error로 닫힌 후)
-            # 파일을 열려고 시도.
-            # FileNotFoundError는 start()의 메인 루프에서 처리됨.
             await self._open_file()
             return
         
-        # _fd가 있으면, inode가 변경되었는지 확인
         try:
-            # 경로(path)를 stat
             path_stat = self.eve_log_path.stat()
         except FileNotFoundError:
-            # 파일이 아예 사라짐 (회전 직후)
-            log("[MCP] 🔄 Log file disappeared, closing handle.")
+            log("[MCP] 🔄 파일 사라짐")
             self._fd.close()
             self._fd = None
             self._inode = None
-            raise # FileNotFoundError를 start() 루프로 전달
+            raise
         
-        # inode 변경 = 파일 회전
         if self._inode is not None and path_stat.st_ino != self._inode:
-            log("[MCP] 🔄 Log rotation detected (inode changed), reopening...")
+            log("[MCP] 🔄 로그 회전")
             self._fd.close()
             self._fd = None
-            # FileNotFoundError가 아니므로, 여기서 직접 _open_file() 호출
-            # (이것도 실패하면 메인 루프가 잡음)
             await self._open_file()
 
-    def _consume_line(self, line: str):
-        """라인 파싱 (기존과 동일)"""
+    async def _consume_line(self, line: str):
         s = line.strip()
         if not s:
             return
@@ -228,21 +387,12 @@ class SuricataMonitor:
         except json.JSONDecodeError:
             return
         
-        # [디버깅 로그] 사용자가 추가한 로그로 추정되어 유지합니다.
-        # event_type = event.get('event_type')
-        # if event_type:
-        #     log(f"[MCP] Read event type: {event_type}")
-
-        # [!!!] 진단용 로그: 이 로그는 터미널에 출력되어야 합니다.
-        log(f"[MCP] Read event type: {event.get('event_type', 'unknown')}")
-
         if event.get("event_type") != "alert":
             return
         
-        self._process_alert(event)
+        await self._process_alert(event)
     
-    def _process_alert(self, event: dict):
-        """알림 처리 및 저장 (기존과 동일)"""
+    async def _process_alert(self, event: dict):
         alert = event.get("alert", {}) or {}
         
         info = {
@@ -259,7 +409,6 @@ class SuricataMonitor:
             "signature_id": alert.get("signature_id", 0),
             "action": alert.get("action", ""),
             "app_proto": event.get("app_proto", ""),
-            "metadata": alert.get("metadata", {}),
         }
         
         alert_history.append(info)
@@ -267,345 +416,69 @@ class SuricataMonitor:
         if len(alert_history) > MAX_ALERTS:
             del alert_history[:len(alert_history) - MAX_ALERTS]
         
-        if info["severity"] <= 2:
-            log(f"[ALERT] {info['severity']} | {info['src_ip']} → {info['dest_ip']} | {info['signature']}")
-
-# ================== MCP 서버 ==================
-server = Server("suricata-mcp-server")
-monitor = SuricataMonitor()
-
-@server.list_resources()
-async def handle_list_resources() -> list[Resource]:
-    """제공 가능한 리소스 목록"""
-    return [
-        Resource(
-            uri="suricata://alerts",
-            name="Suricata Alerts",
-            description="Recent security alerts from Suricata IDS",
-            mimeType="application/json",
-        ),
-        Resource(
-            uri="suricata://blocked_ips",
-            name="Blocked IPs",
-            description="List of blocked IP addresses",
-            mimeType="application/json",
-        ),
-        Resource(
-            uri="suricata://stats",
-            name="Statistics",
-            description="Alert statistics",
-            mimeType="application/json",
-        ),
-    ]
-
-@server.read_resource()
-async def handle_read_resource(uri: str) -> str:
-    """리소스 읽기"""
-    if uri == "suricata://alerts":
-        return json.dumps({
-            "total": len(alert_history),
-            "alerts": alert_history[-100:]  # 최근 100개
-        }, indent=2)
-    
-    if uri == "suricata://blocked_ips":
-        return json.dumps({
-            "total": len(blocked_ips),
-            "ips": list(blocked_ips)
-        }, indent=2)
-    
-    if uri == "suricata://stats":
-        # 통계 계산
-        total = len(alert_history)
-        by_severity = {}
-        by_category = {}
-        top_sources = {}
+        # 10개마다 파일 저장
+        self._save_counter += 1
+        if self._save_counter >= 10:
+            save_alerts()
+            self._save_counter = 0
         
-        for a in alert_history:
-            sev = a.get("severity", 3)
-            by_severity[sev] = by_severity.get(sev, 0) + 1
+        severity = info["severity"]
+        
+        if severity <= 2:
+            log(f"[ALERT] 심각도 {severity} | {info['src_ip']} → {info['dest_ip']} | {info['signature']}")
+        
+        # 자동 룰 생성
+        if AUTO_GENERATE and OLLAMA_ENABLED and severity <= SEVERITY_THRESHOLD:
+            signature_id = info["signature_id"]
             
-            cat = a.get("category", "unknown")
-            by_category[cat] = by_category.get(cat, 0) + 1
-            
-            src = a.get("src_ip", "unknown")
-            top_sources[src] = top_sources.get(src, 0) + 1
-        
-        top_10 = dict(sorted(top_sources.items(), key=lambda x: x[1], reverse=True)[:10])
-        
-        return json.dumps({
-            "total_alerts": total,
-            "by_severity": by_severity,
-            "by_category": by_category,
-            "top_sources": top_10,
-            "blocked_ips": len(blocked_ips)
-        }, indent=2)
-    
-    raise ValueError(f"Unknown resource: {uri}")
-
-@server.list_tools()
-async def handle_list_tools() -> list[Tool]:
-    """제공 가능한 도구 목록"""
-    return [
-        Tool(
-            name="get_recent_alerts",
-            description="Get recent security alerts from Suricata",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "count": {
-                        "type": "number",
-                        "description": "Number of alerts to retrieve",
-                        "default": 10
-                    },
-                    "severity": {
-                        "type": "number",
-                        "description": "Filter by severity (1=high, 2=medium, 3=low)",
-                        "minimum": 1,
-                        "maximum": 3
-                    },
-                    "category": {
-                        "type": "string",
-                        "description": "Filter by category"
-                    }
-                },
-            },
-        ),
-        Tool(
-            name="search_alerts",
-            description="Search alerts by IP address or signature",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "IP address or signature to search"
-                    }
-                },
-                "required": ["query"],
-            },
-        ),
-        Tool(
-            name="get_alert_stats",
-            description="Get alert statistics",
-            inputSchema={
-                "type": "object",
-                "properties": {},
-            },
-        ),
-        Tool(
-            name="block_ip",
-            description="Block an IP address using iptables",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "ip": {
-                        "type": "string",
-                        "description": "IP address to block"
-                    },
-                    "reason": {
-                        "type": "string",
-                        "description": "Reason for blocking"
-                    }
-                },
-                "required": ["ip"],
-            },
-        ),
-        Tool(
-            name="add_suricata_rule",
-            description="Add a new Suricata rule (준비 중 - LLM 연동용)",
-            inputSchema={
-                "type": "object",
-                "properties": {
-                    "rule_content": {
-                        "type": "string",
-                        "description": "Suricata rule content"
-                    },
-                    "description": {
-                        "type": "string",
-                        "description": "Rule description"
-                    }
-                },
-                "required": ["rule_content"],
-            },
-        ),
-    ]
-
-@server.call_tool()
-async def handle_call_tool(name: str, arguments: dict | None) -> list[TextContent | ImageContent | EmbeddedResource]:
-    """도구 실행"""
-    args = arguments or {}
-    
-    # 최근 알림 조회
-    if name == "get_recent_alerts":
-        count = int(args.get("count", 10))
-        severity_filter = args.get("severity", None)
-        category_filter = args.get("category", None)
-        
-        alerts = alert_history[-count:]
-        
-        # 필터링
-        if severity_filter is not None:
-            alerts = [a for a in alerts if a.get("severity") == int(severity_filter)]
-        
-        if category_filter:
-            alerts = [a for a in alerts if a.get("category", "").lower() == category_filter.lower()]
-        
-        return [TextContent(
-            type="text",
-            text=json.dumps({
-                "count": len(alerts),
-                "alerts": alerts
-            }, indent=2)
-        )]
-    
-    # 알림 검색
-    if name == "search_alerts":
-        query = str(args.get("query", "")).lower()
-        results = []
-        
-        for a in alert_history:
-            if (query in (a.get("src_ip", "") or "").lower() or
-                query in (a.get("dest_ip", "") or "").lower() or
-                query in (a.get("signature", "") or "").lower()):
-                results.append(a)
-        
-        return [TextContent(
-            type="text",
-            text=json.dumps({
-                "query": query,
-                "results": len(results),
-                "alerts": results[-50:]  # 최근 50개
-            }, indent=2)
-        )]
-    
-    # 통계
-    if name == "get_alert_stats":
-        total = len(alert_history)
-        by_severity = {}
-        by_category = {}
-        top_sources = {}
-        
-        for a in alert_history:
-            sev = a.get("severity", 3)
-            by_severity[sev] = by_severity.get(sev, 0) + 1
-            
-            cat = a.get("category", "unknown")
-            by_category[cat] = by_category.get(cat, 0) + 1
-            
-            src = a.get("src_ip", "unknown")
-            top_sources[src] = top_sources.get(src, 0) + 1
-        
-        top_10 = dict(sorted(top_sources.items(), key=lambda x: x[1], reverse=True)[:10])
-        
-        stats = {
-            "total_alerts": total,
-            "by_severity": by_severity,
-            "by_category": by_category,
-            "top_sources": top_10,
-            "blocked_ips": len(blocked_ips)
-        }
-        
-        return [TextContent(type="text", text=json.dumps(stats, indent=2))]
-    
-    # IP 차단
-    if name == "block_ip":
-        ip = args.get("ip")
-        if not ip:
-            raise ValueError("IP address required")
-        
-        reason = args.get("reason", "Security threat")
-        is_ipv6 = ":" in ip
-        cmd = ["sudo", "ip6tables" if is_ipv6 else "iptables", "-A", "INPUT", "-s", ip, "-j", "DROP"]
-        
-        try:
-            import subprocess
-            result = subprocess.run(cmd, capture_output=True, text=True)
-            
-            if result.returncode == 0:
-                blocked_ips.add(ip)
-                log(f"[BLOCK] IP {ip} blocked: {reason}")
+            if signature_id not in processed_alerts:
+                processed_alerts.add(signature_id)
                 
-                # 로그 파일에도 기록
-                log_entry = {
-                    "timestamp": datetime.now().isoformat(),
-                    "action": "BLOCK",
-                    "ip": ip,
-                    "reason": reason
-                }
+                log(f"[MCP] 🎯 자동 룰 생성: {info['signature']}")
                 
-                log_dir = Path("logs/actions")
-                log_dir.mkdir(parents=True, exist_ok=True)
+                rule = await self.ollama.generate_rule(info)
                 
-                with open(log_dir / "blocks.log", "a") as f:
-                    f.write(json.dumps(log_entry) + "\n")
-                
-                return [TextContent(
-                    type="text",
-                    text=f"✓ Successfully blocked {ip}\nReason: {reason}"
-                )]
-            else:
-                return [TextContent(
-                    type="text",
-                    text=f"✗ Failed to block {ip}\nError: {result.stderr}"
-                )]
-        except Exception as e:
-            return [TextContent(type="text", text=f"✗ Error: {e}")]
+                if rule:
+                    success = await self.rule_manager.add_rule(rule, info)
+                    if success:
+                        log(f"[MCP] ✅ 룰 생성 & 추가 완료!")
     
-    # Suricata 룰 추가 (준비 중)
-    if name == "add_suricata_rule":
-        rule_content = args.get("rule_content")
-        description = args.get("description", "")
-        
-        # 🚧 준비 중: LLM 연동 후 구현
-        return [TextContent(
-            type="text",
-            text=json.dumps({
-                "status": "준비 중",
-                "message": "LLM 연동 후 구현 예정",
-                "received_rule": rule_content,
-                "description": description,
-                "target_path": RULES_PATH
-            }, indent=2, ensure_ascii=False)
-        )]
-    
-    raise ValueError(f"Unknown tool: {name}")
+    async def stop(self):
+        self.running = False
+        save_alerts()  # 종료 시 마지막 저장
+        save_rules()
+        if self._fd:
+            try:
+                self._fd.close()
+            except:
+                pass
+        await self.ollama.close()
 
-# ================== 엔트리 포인트 ==================
+# ================== 메인 ==================
 async def main():
-    """메인 함수"""
     log("=" * 60)
-    log("🛡️  Suricata MCP Server Starting...")
+    log("🛡️  Suricata MCP Server (데이터 공유)")
     log("=" * 60)
     log(f"📁 Eve Log: {EVE_LOG_PATH}")
     log(f"📁 Rules Path: {RULES_PATH}")
-    log(f"🔄 Backfill: {BACKFILL_LINES} lines")
-    log(f"💾 Max Alerts: {MAX_ALERTS}")
+    log(f"💾 Alerts File: {ALERTS_FILE}")
+    log(f"💾 Rules File: {RULES_FILE}")
+    log(f"🤖 Ollama: {'Enabled' if OLLAMA_ENABLED else 'Disabled'}")
+    if OLLAMA_ENABLED:
+        log(f"   Model: {OLLAMA_MODEL}")
+    log(f"⚡ Auto Gen: {'Enabled' if AUTO_GENERATE else 'Disabled'}")
     log("=" * 60)
     
-    # Suricata 모니터 시작 (백그라운드)
-    monitor_task = asyncio.create_task(monitor.start())
+    monitor = SuricataMonitor()
     
-    # MCP 서버 실행 (stdio)
-    async with stdio_server() as (read_stream, write_stream):
-        log("✓ Suricata MCP Server started (stdio)")
-        await server.run(
-            read_stream,
-            write_stream,
-            InitializationOptions(
-                server_name="suricata-mcp-server",
-                server_version="2.0.0",
-                capabilities=server.get_capabilities(
-                    notification_options=NotificationOptions(),
-                    experimental_capabilities={},
-                ),
-            ),
-        )
+    try:
+        await monitor.start()
+    except KeyboardInterrupt:
+        log("\n🛑 중지...")
+        await monitor.stop()
 
 if __name__ == "__main__":
     try:
         asyncio.run(main())
     except KeyboardInterrupt:
-        log("\n🛑 Suricata MCP Server stopped by user")
-    except Exception as e:
-        log(f"❌ Fatal error: {e}")
-        sys.exit(1)
+        log("\n🛑 종료")

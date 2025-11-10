@@ -398,6 +398,40 @@ async function loadRules() {
     }
 }
 
+async function searchRules() {
+    const query = document.getElementById('ruleSearchInput').value;
+    
+    if (!query.trim()) {
+        loadRules(); // 검색어 없으면 전체 로드
+        return;
+    }
+    
+    const tbody = document.getElementById('rulesTableBody');
+    tbody.innerHTML = '<tr><td colspan="6"><div class="spinner"></div></td></tr>';
+    
+    const data = await apiFetch(`/api/rules/search?query=${encodeURIComponent(query)}`);
+    const rules = data?.results || [];
+    
+    if (rules.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center; padding: 2rem;">검색 결과 없음</td></tr>';
+    } else {
+        tbody.innerHTML = rules.map(rule => `
+            <tr>
+                <td><code>${rule.sid}</code></td>
+                <td><span class="severity-badge severity-${rule.action === 'drop' ? 'critical' : 'high'}">${rule.action?.toUpperCase()}</span></td>
+                <td>${rule.message}</td>
+                <td>${rule.category}</td>
+                <td><small>${rule.file}</small></td>
+                <td>
+                    <button class="action-btn" onclick='showRuleDetail(event, ${JSON.stringify(rule)})'>
+                        <i class="bi bi-eye"></i>
+                    </button>
+                </td>
+            </tr>
+        `).join('');
+    }
+}
+
 async function loadReports() {
     const tbody = document.getElementById('reportsTableBody'); // ID 수정됨
     if (!tbody) return;

@@ -160,15 +160,24 @@
                 </div>
                 
                 <div class="table-container">
-                     <div class="table-header">
+                    <div class="table-header">
                         <h2 class="table-title">Active Rules List</h2>
                         <div class="table-filters">
+                            <input type="text" 
+                                   class="filter-input" 
+                                   id="ruleSearchInput" 
+                                   placeholder="🔍 Search rules..."
+                                   onkeypress="if(event.key==='Enter') searchRules()">
+                            <button class="filter-btn" onclick="searchRules()">
+                                <i class="bi bi-search"></i> Search
+                            </button>
                             <select class="filter-input" id="ruleCategoryFilter">
                                 <option value="all">전체 카테고리</option>
                                 <option value="attempted-admin">Attempted Admin</option>
                                 <option value="web-application-attack">Web Attack</option>
                                 <option value="trojan">Trojan</option>
                                 <option value="attempted-recon">Reconnaissance</option>
+                                <option value="ai-generated">AI Generated</option>
                             </select>
                             <button class="filter-btn" onclick="loadRules()">Apply Filters</button>
                         </div>
