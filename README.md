@@ -35,7 +35,7 @@ Suricata IPS와 MCP 서버를 활용한 완전한 보안 모니터링 솔루션�
 
 # 3. 접속
 # http://localhost:8080
-# 로그인: admin / admin123
+# 로그인: admin / admin
 ```
 
 ---
@@ -238,13 +238,11 @@ sudo chmod 644 /var/log/suricata/eve.json
 ---
 
 ## 💡 팁
-
-- **더미 데이터**: FastAPI는 100개 더미 알림 자동 생성
 - **HexStrike**: Ollama 설치 후 활성화 예정
 - **로그**: `logs/` 디렉토리 확인
 
 ---
 
 **버전:** 2.0.0  
-**업데이트:** 2025-01-10  
+**업데이트:** 2025-01-10
 **라이선스:** MIT

@@ -946,3 +946,20 @@ function refreshChartTheme() {
         }
     }
 }
+
+/* Overview 페이지 전체 새로고침 */
+function refreshOverview() {
+  showToast('Refreshing Overview data...', 'success');
+  updateStats(); // 통계 카드 + 원형 차트
+  updateChart(getActiveChartRange()); // 라인 차트
+  loadRecentAlerts(); // 최근 알림 테이블
+}
+
+/* 현재 활성화된 차트 범위를 반환 (예: 24h, 7d) */
+function getActiveChartRange() {
+  const activeButton = document.querySelector('.chart-option.active');
+  if (activeButton && activeButton.dataset.range) {
+    return activeButton.dataset.range;
+  }
+  return '24h'; // 기본값
+}

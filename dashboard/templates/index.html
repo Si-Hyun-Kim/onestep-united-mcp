@@ -86,7 +86,11 @@
                 <div class="table-container">
                     <div class="table-header">
                         <h2 class="table-title">Recent Alerts</h2>
-                        <button class="filter-btn" onclick="switchPage('alerts')">View All →</button>
+                        <div> <button class="filter-btn" onclick="refreshOverview()" title="Refresh All Overview Data">
+                            <i class="bi bi-arrow-clockwise"></i> Refresh All
+                            </button>
+                            <button class="filter-btn" onclick="switchPage('alerts')" style="margin-left: 0.5rem;">View All →</button>
+                        </div>
                     </div>
                     <table>
                         <thead>
@@ -122,6 +126,9 @@
                                 <option value="100">Last 100</option>
                                 <option value="200">Last 200</option>
                             </select>
+                            <button class="filter-btn" onclick="loadRules()" title="Refresh List">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
                             <button class="filter-btn" onclick="loadAlerts()">Apply Filters</button>
                         </div>
                     </div>
@@ -179,6 +186,9 @@
                                 <option value="attempted-recon">Reconnaissance</option>
                                 <option value="ai-generated">AI Generated</option>
                             </select>
+                            <button class="filter-btn" onclick="loadAlerts()" title="Refresh List">
+                                <i class="bi bi-arrow-clockwise"></i>
+                            </button>
                             <button class="filter-btn" onclick="loadRules()">Apply Filters</button>
                         </div>
                     </div>
@@ -271,7 +281,17 @@
             </div>
 
             <div class="page" id="page-comparison">
-                <div id="comparisonContainer">
+    
+                <div class="table-container" style="margin-bottom: 1.5rem; padding-bottom: 0; border-bottom: none;">
+                    <div class="table-header" style="margin-bottom: 0;">
+                        <h2 class="table-title">Attack vs Defense Analysis</h2>
+                        <button class="filter-btn" onclick="loadComparison()">
+                            <i class="bi bi-arrow-clockwise"></i> Refresh
+                        </button>
+                    </div>
+                </div>
+
+                <div id="comparisonContainer" style="margin-top: -1.5rem;">
                     <div class="spinner"></div>
                 </div>
             </div>
